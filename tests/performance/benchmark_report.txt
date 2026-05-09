@@ -1,0 +1,39 @@
+================================================================================
+AI Writing Platform — Performance Benchmark Report
+Generated: run `locust ... --headless` against a live stack to replace this file
+================================================================================
+
+Run command:
+  locust -f tests/performance/locustfile.py \
+    --host http://localhost:8000 \
+    --users 10 --spawn-rate 2 --run-time 60s --headless
+
+Environment:
+  Users       : 10
+  Spawn rate  : 2 users/s
+  Duration    : 60 s
+  Host        : http://localhost:8000
+
+--------------------------------------------------------------------------------
+Endpoint Summary
+--------------------------------------------------------------------------------
+ Type  Name                                    # reqs  # fails  Avg(ms)  p95(ms)
+ POST  /api/v1/inference/generate               [run against live stack]
+ POST  /api/v1/pipelines/documents/process      [run against live stack]
+ GET   /api/v1/pipelines/documents/             [run against live stack]
+
+--------------------------------------------------------------------------------
+SLA Check
+--------------------------------------------------------------------------------
+  PENDING  /api/v1/inference/generate           p95 < 8000 ms
+  PENDING  /api/v1/pipelines/documents/process  p95 < 15000 ms
+
+--------------------------------------------------------------------------------
+Notes
+--------------------------------------------------------------------------------
+* This file is a placeholder. Replace with actual locust --csv or copy of the
+  console SLA REPORT printed at test_stop when run against the Docker stack.
+* Start the stack first:  cd infrastructure && docker compose up --build
+* Set credentials via env:
+    LOCUST_EMAIL=perf@example.com LOCUST_PASSWORD=perfpassword123
+================================================================================

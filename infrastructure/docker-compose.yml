@@ -1,0 +1,133 @@
+networks:
+  platform_net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+
+services:
+  # ─── Frontend ──────────────────────────────────────────────
+  frontend:
+    build:
+      context: ../../ai-writing-platform-frontend
+      dockerfile: Dockerfile
+      args:
+        - VITE_API_GATEWAY_URL=http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api_gateway
+    networks:
+      - platform_net
+    restart: unless-stopped
+
+  # ─── API Gateway ───────────────────────────────────────────
+  api_gateway:
+    build:
+      context: ../backend/api_gateway
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - AI_INFERENCE_URL=http://ai_inference:8001
+      - KNOWLEDGE_RETRIEVAL_URL=http://knowledge_retrieval:8002
+      - PIPELINES_URL=http://pipelines:8003
+      - POSTGRES_DSN=postgresql://platform:platform@postgres:5432/platform
+      - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
+      - CORS_ORIGINS=http://localhost:3000
+      - REDIS_URL=redis://redis:6379/2
+      - FRONTEND_URL=http://localhost:3000
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
+      - STRIPE_PRICE_BASIC=${STRIPE_PRICE_BASIC:-}
+      - STRIPE_PRICE_PRO=${STRIPE_PRICE_PRO:-}
+    depends_on:
+      - postgres
+      - redis
+      - ai_inference
+      - knowledge_retrieval
+      - pipelines
+    networks:
+      - platform_net
+    restart: unless-stopped
+
+  # ─── AI Inference ──────────────────────────────────────────
+  ai_inference:
+    build:
+      context: ../backend/ai_inference
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=postgresql://platform:platform@postgres:5432/platform
+    depends_on:
+      - redis
+      - postgres
+    networks:
+      - platform_net
+    restart: unless-stopped
+
+  # ─── Knowledge Retrieval ───────────────────────────────────
+  knowledge_retrieval:
+    build:
+      context: ../backend/knowledge_retrieval
+      dockerfile: Dockerfile
+    ports:
+      - "8002:8002"
+    environment:
+      - POSTGRES_DSN=postgresql://platform:platform@postgres:5432/platform
+    depends_on:
+      - postgres
+    networks:
+      - platform_net
+    restart: unless-stopped
+
+  # ─── Pipelines ─────────────────────────────────────────────
+  pipelines:
+    build:
+      context: ../backend/pipelines
+      dockerfile: Dockerfile
+    ports:
+      - "8003:8003"
+    environment:
+      - REDIS_URL=redis://redis:6379/1
+      - AI_INFERENCE_URL=http://ai_inference:8001
+      - KNOWLEDGE_RETRIEVAL_URL=http://knowledge_retrieval:8002
+      - POSTGRES_DSN=postgresql://platform:platform@postgres:5432/platform
+    depends_on:
+      - redis
+      - postgres
+      - ai_inference
+      - knowledge_retrieval
+    networks:
+      - platform_net
+    restart: unless-stopped
+
+  # ─── PostgreSQL + pgvector ─────────────────────────────────
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: platform
+      POSTGRES_PASSWORD: platform
+      POSTGRES_DB: platform
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5458:5432"
+    networks:
+      - platform_net
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - platform_net
+    restart: unless-stopped
