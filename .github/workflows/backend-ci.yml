@@ -1,0 +1,80 @@
+# =============================================================================
+# 后端「纯单元测试」最小 CI
+#
+# 当前仅执行 tests/unit/test_api_gateway.py，原因如下（未改业务代码与测试结构）：
+#
+# 1) test_ai_inference.py / test_knowledge_retrieval.py — 整文件跳过
+#    - FastAPI lifespan 会 init_db / get_pool，默认指向 Postgres；knowledge 还会在
+#      启动时 embed_sync("warmup")，涉及 fastembed 模型与数据库。
+#
+# 2) test_pipelines.py — 暂不纳入
+#    - 文件底部存在模块级 TestClient(app)；导入该模块即触发 pipelines lifespan
+#      中的 get_pool()，需要 Postgres。前半段 doc_processor 类测虽为纯逻辑，但与
+#      同文件内会连库的 TestClient 代码共存，pytest 收集用例时会整模块导入，无法
+#      在不改测试文件的前提下只跑前半段。
+#
+# 3) test_security.py — 暂不纳入
+#    - 模块级 TestClient(inference_app) 在导入时即启动 ai_inference lifespan
+#     （init_db 等），需要数据库。
+#
+# 4) tests/integration/、e2e、performance — 按项目要求本 workflow 不运行。
+#
+# 后续若将上述测试拆分为独立模块或延迟导入 TestClient，可在此 workflow 中逐步
+# 扩大 pytest 路径，无需改业务逻辑。
+# =============================================================================
+
+name: 后端纯单元测试
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+jobs:
+  pure-unit-tests:
+    name: 纯单元测试（API Gateway）
+    runs-on: ubuntu-latest
+
+    steps:
+      # 将仓库代码检出到 Runner，后续步骤均基于此工作副本。
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      # 与 README 及各服务 Dockerfile 对齐，使用 Python 3.12。
+      - name: 配置 Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/api_gateway/requirements.txt
+
+      # 仅安装当前实际会跑的测试所依赖的服务包：api_gateway + pytest 运行器。
+      - name: 安装 Python 依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/api_gateway/requirements.txt
+          pip install pytest
+
+      # 只收集并执行网关根路径与健康检查用例；不扫描 integration 与其它 unit 文件。
+      - name: 运行纯单元测试
+        run: |
+          pytest tests/unit/test_api_gateway.py -v --tb=short
+
+      # 在日志中固定打印「未纳入本 job」的测试及原因，便于 Code Review 与后续扩展。
+      - name: 打印未纳入本 CI 的测试及原因
+        if: success()
+        run: |
+          cat << 'EOF'
+          ============================================
+          【本 workflow 未执行的测试及原因摘要】
+          ============================================
+          • tests/integration/ — 集成测试，需起全栈或网关路由，本 workflow 明确排除。
+          • tests/unit/test_ai_inference.py — lifespan + SQLAlchemy init_db，默认连 Postgres。
+          • tests/unit/test_knowledge_retrieval.py — lifespan 内 get_pool + fastembed 预热，依赖 DB 与 embedding。
+          • tests/unit/test_pipelines.py — 模块导入即执行 TestClient(app)，触发 asyncpg 连接池，需 Postgres。
+          • tests/unit/test_security.py — 模块导入即挂载 ai_inference TestClient，触发 init_db，需 Postgres。
+          • e2e / performance（如 Locust）— 非本 job 范围。
+          ============================================
+          EOF
