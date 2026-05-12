@@ -1,20 +1,17 @@
 # =============================================================================
 # 后端「纯单元测试」最小 CI
 #
-# 当前自动执行：
+# 当前自动执行（pytest 白名单路径，显式列出，不跑整个 tests/unit/）：
 #   • tests/unit/test_api_gateway.py — 网关根路径与健康检查（无 Postgres 依赖）
-#   • tests/unit/test_ai_inference.py — 通过 job 级 DATABASE_URL=SQLite 文件，
-#     在「pytest 进程启动 → fixture 内 import main」之前注入，避免默认连 Docker
-#     内的 postgres 主机名（测试结构已延迟 TestClient，见该测试文件内注释）。
+#   • tests/unit/test_ai_inference.py — job 级 DATABASE_URL=SQLite 文件，fixture 延迟
+#     import main，避免默认连 Docker 内的 postgres（见该测试文件内注释）。
+#   • tests/unit/test_pipelines_doc_processor.py — 仅 doc_processor 纯逻辑，不 import main、
+#     无 TestClient，collect 阶段不会触发 asyncpg/get_pool。
 #
-# 仍未纳入本 workflow 的测试及原因摘要：
-#   • test_knowledge_retrieval — lifespan 内 get_pool + fastembed 预热
-#   • test_pipelines（带 TestClient 段）— asyncpg 连接池需 Postgres
-#   • test_security — 仍含模块级 inference TestClient 等，未纳入 minimal CI
-#   • tests/integration/、e2e、performance — 按项目要求排除
-#
-# 旧说明中「整文件跳过 test_ai_inference」已随 Step 1/2 撤销；若需恢复旧行为请改回
-# 仅 pytest gateway 并去掉下方 job env / ai_inference 依赖安装。
+# 明确不纳入本 workflow：
+#   • tests/unit/test_pipelines.py — 仍为模块级 TestClient(app)，lifespan 内 get_pool() 依赖
+#     Postgres/asyncpg；属 HTTP/component 测试，需后续 Postgres service 或 compose 再进 CI。
+#   • test_knowledge_retrieval、test_security、tests/integration/、e2e、performance 等 — 见下方日志块。
 # =============================================================================
 
 name: 后端纯单元测试
@@ -28,16 +25,14 @@ on:
 
 jobs:
   pure-unit-tests:
-    # 名称反映当前实际覆盖的两个服务级轻量用例集。
-    name: 纯单元测试（API Gateway + AI Inference / SQLite）
+    name: 纯单元测试（Gateway + Inference/SQLite + Pipelines/doc_processor）
 
     runs-on: ubuntu-latest
 
     # ── DATABASE_URL 放在 job 级 env 的原因 ──────────────────────────────────
-    # 1) db/database.py 在首次 import 时读取 os.environ；必须在 pytest 启动前已存在。
-    # 2) 本 job 仅跑 gateway + ai_inference 单测，gateway 不读该变量，无副作用。
-    # 3) 若将来拆成多 step 跑 Python，也无需在每个 step 重复声明。
-    # 使用 /tmp 下单文件 SQLite，避免 :memory: 与连接池多连接不共享同一库的问题。
+    # 1) ai_inference 的 db/database.py 在首次 import 时读取 os.environ；必须在 pytest 启动前已存在。
+    # 2) gateway / pipelines doc_processor 单测不读该变量，无副作用。
+    # 3) 使用 /tmp 下单文件 SQLite，避免 :memory: 与连接池多连接不共享同一库的问题。
     env:
       DATABASE_URL: sqlite:////tmp/ai_inference_ci.sqlite
 
@@ -46,7 +41,7 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
 
-      # 与 README 及各服务 Dockerfile 对齐，使用 Python 3.12；pip 缓存覆盖 gateway 与 inference。
+      # 与 README 及各服务 Dockerfile 对齐，使用 Python 3.12；pip 缓存覆盖本 job 所装 requirements。
       - name: 配置 Python 3.12
         uses: actions/setup-python@v5
         with:
@@ -55,13 +50,15 @@ jobs:
           cache-dependency-path: |
             backend/api_gateway/requirements.txt
             backend/ai_inference/requirements.txt
+            backend/pipelines/requirements.txt
 
-      # 安装两个服务单测所需的第三方库及 pytest（合并为一步，减少重复解析索引）。
+      # 安装白名单单测所需的第三方库及 pytest。
       - name: 安装 Python 依赖
         run: |
           python -m pip install --upgrade pip
           pip install -r backend/api_gateway/requirements.txt
           pip install -r backend/ai_inference/requirements.txt
+          pip install -r backend/pipelines/requirements.txt
           pip install pytest
 
       # 网关用例不依赖 DATABASE_URL；继承 job env 无害。
@@ -74,6 +71,11 @@ jobs:
         run: |
           pytest tests/unit/test_ai_inference.py -v --tb=short
 
+      # 仅 doc_processor 纯逻辑：不收集 test_pipelines.py，故不会启动 FastAPI lifespan/asyncpg。
+      - name: 运行单元测试（Pipelines / doc_processor 纯逻辑）
+        run: |
+          pytest tests/unit/test_pipelines_doc_processor.py -v --tb=short
+
       # 在日志中固定打印「仍未纳入本 job」的测试及原因，便于 Code Review 与后续扩展。
       - name: 打印未纳入本 CI 的测试及原因
         if: success()
@@ -84,7 +86,8 @@ jobs:
           ============================================
           • tests/integration/ — 集成测试，需已启动的服务，本 workflow 明确排除。
           • tests/unit/test_knowledge_retrieval.py — lifespan 内 get_pool + fastembed 预热，依赖 Postgres 与 embedding。
-          • tests/unit/test_pipelines.py — 模块内 TestClient 段需 asyncpg/Postgres；纯 doc_processor 段待拆文件后再纳入。
+          • tests/unit/test_pipelines.py — HTTP/component：模块级 TestClient(app) + lifespan 内 asyncpg 连接 Postgres；
+            未纳入 minimal CI；纯逻辑已拆至 test_pipelines_doc_processor.py。
           • tests/unit/test_security.py — 模块级 inference TestClient 等，未纳入 minimal CI。
           • e2e / performance（如 Locust）— 非本 job 范围。
           ============================================
