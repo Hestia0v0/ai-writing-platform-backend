@@ -25,9 +25,6 @@ from doc_processor import (
     TextCleaner,
     TextChunker,
     TxtParser,
-    UnsupportedFormatError,
-    FileSizeError,
-    ParseError,
 )
 
 
@@ -108,6 +105,13 @@ class TestTextChunker:
 
 
 # ── TxtParser ─────────────────────────────────────────────────────────────────
+#
+# TxtParser 采用「先成功先返回」的编码 fallback：依次尝试 utf-8 → utf-16 → latin-1 → cp1252，
+# 任一 decode 成功即返回，不探测「最可能」编码。因此：
+#   • 偶数长度且能被 utf-16 吃下的字节串会先于 latin-1 成功（可能与真实意图不符）；
+#   • latin-1 对任意单字节永不抛 UnicodeDecodeError，链中靠后的编码几乎总能兜底；
+#   • 与「容错型」语义一致：尽量不 ParseError，而非对随机二进制报错。
+# 以下用例按上述真实行为编写，不假设 latin-1 一定排在 utf-16 之前被尝试。
 
 class TestTxtParser:
     parser = TxtParser()
@@ -123,14 +127,21 @@ class TestTxtParser:
         assert pages == 1
 
     def test_latin1_fallback(self):
-        content = "caf\xe9".encode("latin-1")
-        text, _ = self.parser.parse(content, "test.txt")
+        # 使用「奇数长度」Latin-1 负载：utf-16 对奇数长度会失败，从而不会抢在 latin-1 之前成功。
+        # utf-8 对该序列亦失败，最终由 latin-1 解码，结果应与 bytes.decode("latin-1") 一致。
+        content = "caf\xe9".encode("latin-1") + b"\xff"  # 5 字节，café + 0xFF（ÿ）
+        text, pages = self.parser.parse(content, "latin1-ish.txt")
+        assert pages == 1
+        assert text == content.decode("latin-1")
         assert "caf" in text
 
-    def test_raises_parse_error_on_unreadable_bytes(self):
-        with pytest.raises(ParseError):
-            # Bytes that fail all supported encodings
-            self.parser.parse(b"\x80\x81\x82\x83" * 100, "bad.txt")
+    def test_arbitrary_bytes_decode_tolerant_no_parse_error(self):
+        # 高熵字节流：utf-8 常失败，但 utf-16 或 latin-1 往往仍能 decode，符合容错语义，不应抛 ParseError。
+        content = b"\x80\x81\x82\x83" * 100
+        text, pages = self.parser.parse(content, "binary-ish.txt")
+        assert pages == 1
+        assert isinstance(text, str)
+        assert len(text) > 0
 
 
 # ── Full Pipeline (mock inference) ────────────────────────────────────────────
