@@ -4,7 +4,7 @@ networks:
 
 volumes:
   postgres_data:  # 阿里云 RDS 方案：删除此行
-  redis_data:
+  redis_data:     # Railway Redis 方案：删除此行
 
 services:
   # ─── Frontend ──────────────────────────────────────────────
@@ -39,6 +39,8 @@ services:
       - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
       - CORS_ORIGINS=http://localhost:3000
       - REDIS_URL=redis://redis:6379/2
+      # Railway Redis：将上一行替换为：
+      # - REDIS_URL=${REDIS_GATEWAY_URL}
       - FRONTEND_URL=http://localhost:3000
       - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
       - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
@@ -46,7 +48,7 @@ services:
       - STRIPE_PRICE_PRO=${STRIPE_PRICE_PRO:-}
     depends_on:
       - postgres  # 阿里云 RDS：删除此行
-      - redis
+      - redis     # Railway Redis：删除此行
       - ai_inference
       - knowledge_retrieval
       - pipelines
@@ -64,11 +66,13 @@ services:
     environment:
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
       - REDIS_URL=redis://redis:6379/0
+      # Railway Redis：将上一行替换为：
+      # - REDIS_URL=${REDIS_INFERENCE_URL}
       - DATABASE_URL=postgresql://platform:platform@postgres:5432/platform
       # 阿里云 RDS：将上一行替换为：
       # - DATABASE_URL=${POSTGRES_DSN}
     depends_on:
-      - redis
+      - redis     # Railway Redis：删除此行
       - postgres  # 阿里云 RDS：删除此行
     networks:
       - platform_net
@@ -100,13 +104,15 @@ services:
       - "8003:8003"
     environment:
       - REDIS_URL=redis://redis:6379/1
+      # Railway Redis：将上一行替换为：
+      # - REDIS_URL=${REDIS_PIPELINES_URL}
       - AI_INFERENCE_URL=http://ai_inference:8001
       - KNOWLEDGE_RETRIEVAL_URL=http://knowledge_retrieval:8002
       - POSTGRES_DSN=postgresql://platform:platform@postgres:5432/platform
       # 阿里云 RDS：将上一行替换为：
       # - POSTGRES_DSN=${POSTGRES_DSN}
     depends_on:
-      - redis
+      - redis     # Railway Redis：删除此行
       - postgres  # 阿里云 RDS：删除此行
       - ai_inference
       - knowledge_retrieval
@@ -132,6 +138,10 @@ services:
       - platform_net
     restart: unless-stopped
 
+  # ─── Redis ────────────────────────────────────────────────
+  # Railway Redis 方案：删除以下整个 redis 服务块。
+  # 切换前请先在 Railway 控制台创建 Redis 服务并获取连接串（含密码和端口），
+  # 然后在 .env 中填写 REDIS_INFERENCE_URL / REDIS_PIPELINES_URL / REDIS_GATEWAY_URL。
   redis:
     image: redis:7-alpine
     volumes:

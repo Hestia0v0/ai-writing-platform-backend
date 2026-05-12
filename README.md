@@ -172,6 +172,41 @@ After the changes, `docker compose up --build` will start all services pointing 
 
 ---
 
+## Switching to Railway Redis
+
+The local `redis` container can be replaced with a [Railway](https://railway.app) managed Redis instance. No service code changes are needed — only `infrastructure/.env` and `docker-compose.yml`.
+
+### 1. Create a Redis Service on Railway
+
+1. Open your Railway project → **New Service → Database → Redis**.
+2. Once deployed, go to the service → **Connect** tab → copy the **Redis URL** (format: `redis://default:<password>@<host>.railway.app:<port>`).
+
+### 2. Update `infrastructure/.env`
+
+Uncomment and fill in the three `REDIS_*_URL` lines (one per logical database):
+
+```env
+REDIS_INFERENCE_URL=redis://default:<password>@<host>.railway.app:<port>/0
+REDIS_PIPELINES_URL=redis://default:<password>@<host>.railway.app:<port>/1
+REDIS_GATEWAY_URL=redis://default:<password>@<host>.railway.app:<port>/2
+```
+
+> **Note**: The host and password are the same for all three — only the trailing `/0`, `/1`, `/2` differs. Railway Redis runs in standard (non-cluster) mode, so logical databases 0–15 are supported.
+
+### 3. Update `docker-compose.yml`
+
+Follow the inline `# Railway Redis` comments already present in the file. Three types of changes:
+
+| What | How |
+|------|-----|
+| `REDIS_URL=redis://redis:6379/X` in each service's `environment:` | Replace with the matching `${REDIS_*_URL}` variable |
+| `- redis` in each service's `depends_on:` | Remove the `redis` entry |
+| Top-level `volumes: redis_data:` and the entire `redis:` service block | Delete both |
+
+After the changes, run `docker compose up --build` — all services will connect to Railway Redis and the local container will no longer start.
+
+---
+
 ## Independent Service Development
 
 Run individual services natively without Docker Compose — useful when iterating on a single service and wanting faster restart times.

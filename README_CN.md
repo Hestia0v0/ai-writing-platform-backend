@@ -172,6 +172,41 @@ POSTGRES_DSN=postgresql://<用户名>:<密码>@rm-xxxx.pg.rds.aliyuncs.com:5432/
 
 ---
 
+## 切换至 Railway Redis
+
+本地 `redis` 容器可直接替换为 [Railway](https://railway.app) 托管的 Redis 实例，无需修改任何业务代码——只需改动 `infrastructure/.env` 和 `docker-compose.yml`。
+
+### 1. 在 Railway 创建 Redis 服务
+
+1. 打开 Railway 项目 → **New Service → Database → Redis**。
+2. 部署完成后，进入该服务 → **Connect** 标签页 → 复制 **Redis URL**（格式：`redis://default:<密码>@<host>.railway.app:<端口>`）。
+
+### 2. 修改 `infrastructure/.env`
+
+取消注释并填写三条 `REDIS_*_URL`（各对应一个逻辑库）：
+
+```env
+REDIS_INFERENCE_URL=redis://default:<密码>@<host>.railway.app:<端口>/0
+REDIS_PIPELINES_URL=redis://default:<密码>@<host>.railway.app:<端口>/1
+REDIS_GATEWAY_URL=redis://default:<密码>@<host>.railway.app:<端口>/2
+```
+
+> **说明**：三条连接串的主机和密码完全相同，仅末尾的 `/0`、`/1`、`/2` 不同。Railway Redis 使用标准（非集群）模式，支持逻辑库 0–15。
+
+### 3. 修改 `docker-compose.yml`
+
+按文件中已有的 `# Railway Redis` 行内注释操作，共三类改动：
+
+| 位置 | 操作 |
+|------|------|
+| 各服务 `environment:` 中的 `REDIS_URL=redis://redis:6379/X` | 替换为对应的 `${REDIS_*_URL}` 变量 |
+| 各服务 `depends_on:` 中的 `- redis` 条目 | 删除 |
+| 顶层 `volumes: redis_data:` 及整个 `redis:` 服务块 | 全部删除 |
+
+改完后执行 `docker compose up --build`，所有服务将连接 Railway Redis，本地 `redis` 容器不再启动。
+
+---
+
 ## 独立服务开发
 
 在不启动完整 Docker Compose 的情况下，单独运行某个微服务——适合只修改某一服务时快速迭代。
