@@ -130,6 +130,48 @@ docker compose down -v       # also remove postgres_data and redis_data
 
 ---
 
+## Switching to Alibaba Cloud RDS
+
+The local `postgres` container can be replaced with an Alibaba Cloud RDS PostgreSQL instance without touching any service code — only `infrastructure/.env` and `docker-compose.yml` need to change.
+
+### 1. Prepare the RDS Instance
+
+- **Version**: PostgreSQL 14 or 16 (matches the current `pgvector/pgvector:pg16` image).
+- **pgvector plugin**: Go to **RDS Console → Instance → Plugin Management**, search for `vector`, and install it. The `knowledge_retrieval` service will fail to start if this plugin is missing.
+- **Network**: Add your server IP to the RDS whitelist, or use VPC private access.
+- **Schema**: The automatic `init.sql` mount used by the Docker container will not run against RDS. Connect to the instance and execute `infrastructure/init.sql` once manually:
+
+  ```bash
+  psql "postgresql://<user>:<password>@rm-xxxx.pg.rds.aliyuncs.com:5432/platform" \
+    -f infrastructure/init.sql
+  ```
+
+  > **Note**: `init.sql` creates an HNSW vector index (`pgvector ≥ 0.5.0` required). Verify the installed plugin version in the RDS console before running.
+
+### 2. Update `infrastructure/.env`
+
+Uncomment and fill in the `POSTGRES_DSN` line that was added as a comment:
+
+```env
+# Alibaba Cloud RDS connection string
+POSTGRES_DSN=postgresql://<user>:<password>@rm-xxxx.pg.rds.aliyuncs.com:5432/platform
+# Append ?sslmode=require if RDS enforces SSL (default for most RDS configurations)
+```
+
+### 3. Update `docker-compose.yml`
+
+Follow the inline `# 阿里云 RDS` comments already present in the file. Three types of changes:
+
+| What | How |
+|------|-----|
+| Hardcoded DSN in each service's `environment:` | Replace with `${POSTGRES_DSN}` (or `DATABASE_URL=${POSTGRES_DSN}` for `ai_inference`) |
+| `depends_on: postgres` in each service | Remove the `postgres` entry |
+| Top-level `volumes: postgres_data:` and the entire `postgres:` service block | Delete both |
+
+After the changes, `docker compose up --build` will start all services pointing at RDS — the local `postgres` container is gone.
+
+---
+
 ## Independent Service Development
 
 Run individual services natively without Docker Compose — useful when iterating on a single service and wanting faster restart times.

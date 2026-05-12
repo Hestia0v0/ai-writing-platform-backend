@@ -3,7 +3,7 @@ networks:
     driver: bridge
 
 volumes:
-  postgres_data:
+  postgres_data:  # 阿里云 RDS 方案：删除此行
   redis_data:
 
 services:
@@ -34,6 +34,8 @@ services:
       - KNOWLEDGE_RETRIEVAL_URL=http://knowledge_retrieval:8002
       - PIPELINES_URL=http://pipelines:8003
       - POSTGRES_DSN=postgresql://platform:platform@postgres:5432/platform
+      # 阿里云 RDS：将上一行替换为：
+      # - POSTGRES_DSN=${POSTGRES_DSN}
       - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
       - CORS_ORIGINS=http://localhost:3000
       - REDIS_URL=redis://redis:6379/2
@@ -43,7 +45,7 @@ services:
       - STRIPE_PRICE_BASIC=${STRIPE_PRICE_BASIC:-}
       - STRIPE_PRICE_PRO=${STRIPE_PRICE_PRO:-}
     depends_on:
-      - postgres
+      - postgres  # 阿里云 RDS：删除此行
       - redis
       - ai_inference
       - knowledge_retrieval
@@ -63,9 +65,11 @@ services:
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
       - REDIS_URL=redis://redis:6379/0
       - DATABASE_URL=postgresql://platform:platform@postgres:5432/platform
+      # 阿里云 RDS：将上一行替换为：
+      # - DATABASE_URL=${POSTGRES_DSN}
     depends_on:
       - redis
-      - postgres
+      - postgres  # 阿里云 RDS：删除此行
     networks:
       - platform_net
     restart: unless-stopped
@@ -79,8 +83,10 @@ services:
       - "8002:8002"
     environment:
       - POSTGRES_DSN=postgresql://platform:platform@postgres:5432/platform
+      # 阿里云 RDS：将上一行替换为：
+      # - POSTGRES_DSN=${POSTGRES_DSN}
     depends_on:
-      - postgres
+      - postgres  # 阿里云 RDS：删除此行
     networks:
       - platform_net
     restart: unless-stopped
@@ -97,9 +103,11 @@ services:
       - AI_INFERENCE_URL=http://ai_inference:8001
       - KNOWLEDGE_RETRIEVAL_URL=http://knowledge_retrieval:8002
       - POSTGRES_DSN=postgresql://platform:platform@postgres:5432/platform
+      # 阿里云 RDS：将上一行替换为：
+      # - POSTGRES_DSN=${POSTGRES_DSN}
     depends_on:
       - redis
-      - postgres
+      - postgres  # 阿里云 RDS：删除此行
       - ai_inference
       - knowledge_retrieval
     networks:
@@ -107,6 +115,8 @@ services:
     restart: unless-stopped
 
   # ─── PostgreSQL + pgvector ─────────────────────────────────
+  # 阿里云 RDS 方案：删除以下整个 postgres 服务块。
+  # 切换前需在阿里云控制台手动安装 vector 插件，并执行 init.sql 完成建表。
   postgres:
     image: pgvector/pgvector:pg16
     environment:

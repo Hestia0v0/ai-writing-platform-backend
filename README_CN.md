@@ -130,6 +130,48 @@ docker compose down -v    # 同时删除 postgres_data 和 redis_data
 
 ---
 
+## 切换至阿里云 RDS
+
+本地 `postgres` 容器可直接替换为阿里云 RDS PostgreSQL 实例，无需修改任何业务代码——只需改动 `infrastructure/.env` 和 `docker-compose.yml`。
+
+### 1. 准备 RDS 实例
+
+- **版本**：PostgreSQL 14 或 16（与当前 `pgvector/pgvector:pg16` 镜像一致）。
+- **pgvector 插件**：进入 **RDS 控制台 → 实例 → 插件管理**，搜索 `vector` 并安装。若插件缺失，`knowledge_retrieval` 服务将无法启动。
+- **网络**：将服务器 IP 加入 RDS 白名单，或配置为 VPC 内网访问。
+- **表结构初始化**：Docker 容器会自动挂载 `init.sql`，但 RDS 不会自动执行。需手动连接实例执行一次：
+
+  ```bash
+  psql "postgresql://<用户名>:<密码>@rm-xxxx.pg.rds.aliyuncs.com:5432/platform" \
+    -f infrastructure/init.sql
+  ```
+
+  > **注意**：`init.sql` 会创建 HNSW 向量索引，要求 `pgvector ≥ 0.5.0`。执行前请在 RDS 控制台确认已安装的插件版本。
+
+### 2. 修改 `infrastructure/.env`
+
+取消注释并填写已预置的 `POSTGRES_DSN` 行：
+
+```env
+# 阿里云 RDS 连接串
+POSTGRES_DSN=postgresql://<用户名>:<密码>@rm-xxxx.pg.rds.aliyuncs.com:5432/platform
+# 若阿里云强制 SSL（大多数 RDS 配置默认开启），末尾加 ?sslmode=require
+```
+
+### 3. 修改 `docker-compose.yml`
+
+按文件中已有的 `# 阿里云 RDS` 行内注释操作，共三类改动：
+
+| 位置 | 操作 |
+|------|------|
+| 各服务 `environment:` 中的硬编码 DSN | 替换为 `${POSTGRES_DSN}`（`ai_inference` 用 `DATABASE_URL=${POSTGRES_DSN}`） |
+| 各服务 `depends_on:` 中的 `postgres` 条目 | 删除 |
+| 顶层 `volumes: postgres_data:` 及整个 `postgres:` 服务块 | 全部删除 |
+
+改完后执行 `docker compose up --build`，所有服务将指向 RDS 实例，本地 `postgres` 容器不再启动。
+
+---
+
 ## 独立服务开发
 
 在不启动完整 Docker Compose 的情况下，单独运行某个微服务——适合只修改某一服务时快速迭代。
