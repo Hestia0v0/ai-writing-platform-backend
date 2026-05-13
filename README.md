@@ -133,6 +133,83 @@ docker compose down -v       # also remove postgres_data and redis_data
 
 ---
 
+## Switching to Alibaba Cloud RDS
+
+The local `postgres` container can be replaced with an Alibaba Cloud RDS PostgreSQL instance without touching any service code — only `infrastructure/.env` and `docker-compose.yml` need to change.
+
+### 1. Prepare the RDS Instance
+
+- **Version**: PostgreSQL 14 or 16 (matches the current `pgvector/pgvector:pg16` image).
+- **pgvector plugin**: Go to **RDS Console → Instance → Plugin Management**, search for `vector`, and install it. The `knowledge_retrieval` service will fail to start if this plugin is missing.
+- **Network**: Add your server IP to the RDS whitelist, or use VPC private access.
+- **Schema**: The automatic `init.sql` mount used by the Docker container will not run against RDS. Connect to the instance and execute `infrastructure/init.sql` once manually:
+
+  ```bash
+  psql "postgresql://<user>:<password>@rm-xxxx.pg.rds.aliyuncs.com:5432/platform" \
+    -f infrastructure/init.sql
+  ```
+
+  > **Note**: `init.sql` creates an HNSW vector index (`pgvector ≥ 0.5.0` required). Verify the installed plugin version in the RDS console before running.
+
+### 2. Update `infrastructure/.env`
+
+Uncomment and fill in the `POSTGRES_DSN` line that was added as a comment:
+
+```env
+# Alibaba Cloud RDS connection string
+POSTGRES_DSN=postgresql://<user>:<password>@rm-xxxx.pg.rds.aliyuncs.com:5432/platform
+# Append ?sslmode=require if RDS enforces SSL (default for most RDS configurations)
+```
+
+### 3. Update `docker-compose.yml`
+
+Follow the inline `# 阿里云 RDS` comments already present in the file. Three types of changes:
+
+| What | How |
+|------|-----|
+| Hardcoded DSN in each service's `environment:` | Replace with `${POSTGRES_DSN}` (or `DATABASE_URL=${POSTGRES_DSN}` for `ai_inference`) |
+| `depends_on: postgres` in each service | Remove the `postgres` entry |
+| Top-level `volumes: postgres_data:` and the entire `postgres:` service block | Delete both |
+
+After the changes, `docker compose up --build` will start all services pointing at RDS — the local `postgres` container is gone.
+
+---
+
+## Switching to Railway Redis
+
+The local `redis` container can be replaced with a [Railway](https://railway.app) managed Redis instance. No service code changes are needed — only `infrastructure/.env` and `docker-compose.yml`.
+
+### 1. Create a Redis Service on Railway
+
+1. Open your Railway project → **New Service → Database → Redis**.
+2. Once deployed, go to the service → **Connect** tab → copy the **Redis URL** (format: `redis://default:<password>@<host>.railway.app:<port>`).
+
+### 2. Update `infrastructure/.env`
+
+Uncomment and fill in the three `REDIS_*_URL` lines (one per logical database):
+
+```env
+REDIS_INFERENCE_URL=redis://default:<password>@<host>.railway.app:<port>/0
+REDIS_PIPELINES_URL=redis://default:<password>@<host>.railway.app:<port>/1
+REDIS_GATEWAY_URL=redis://default:<password>@<host>.railway.app:<port>/2
+```
+
+> **Note**: The host and password are the same for all three — only the trailing `/0`, `/1`, `/2` differs. Railway Redis runs in standard (non-cluster) mode, so logical databases 0–15 are supported.
+
+### 3. Update `docker-compose.yml`
+
+Follow the inline `# Railway Redis` comments already present in the file. Three types of changes:
+
+| What | How |
+|------|-----|
+| `REDIS_URL=redis://redis:6379/X` in each service's `environment:` | Replace with the matching `${REDIS_*_URL}` variable |
+| `- redis` in each service's `depends_on:` | Remove the `redis` entry |
+| Top-level `volumes: redis_data:` and the entire `redis:` service block | Delete both |
+
+After the changes, run `docker compose up --build` — all services will connect to Railway Redis and the local container will no longer start.
+
+---
+
 ## Independent Service Development
 
 Run individual services natively without Docker Compose — useful when iterating on a single service and wanting faster restart times.
