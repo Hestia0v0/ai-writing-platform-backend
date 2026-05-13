@@ -456,9 +456,52 @@ class AIInferenceClient:
     def _parse_live_response(
         self, document_id: str, word_count: int, data: dict
     ) -> ScoringResult:
-        # TODO: parse the model's structured JSON once inference returns real scores.
-        # For now the inference stub doesn't produce a real score, so delegate to mock.
-        return self._build_mock_result(document_id, word_count)
+        score = float(data["score"])
+        grade = data["grade"]
+        model_used = data.get("model_used", "unknown")
+        overall_feedback = data.get("overall_feedback", "")
+        improvement_tips: list[str] = data.get("improvement_tips", [])
+
+        _DIM_TO_CATEGORY = {
+            "content": "evidence",
+            "organization": "structure",
+            "language": "clarity",
+            "conventions": "grammar",
+        }
+
+        def _severity(rubric_score: float, max_score: float = 25.0) -> str:
+            ratio = rubric_score / max_score if max_score else 0
+            if ratio < 0.5:
+                return "error"
+            if ratio < 0.75:
+                return "warning"
+            return "info"
+
+        feedback_items: list[FeedbackItem] = []
+        for i, rubric in enumerate(data.get("rubric", [])):
+            dimension = rubric.get("dimension", "")
+            suggestion = (
+                improvement_tips[i]
+                if i < len(improvement_tips)
+                else "See overall feedback for suggestions."
+            )
+            feedback_items.append(
+                FeedbackItem(
+                    category=_DIM_TO_CATEGORY.get(dimension, dimension),
+                    severity=_severity(float(rubric.get("score", 0)), float(rubric.get("max_score", 25.0))),
+                    message=rubric.get("feedback", ""),
+                    suggestion=suggestion,
+                )
+            )
+
+        return ScoringResult(
+            document_id=document_id,
+            score=score,
+            grade=grade,
+            feedback=feedback_items,
+            summary=overall_feedback,
+            model_used=model_used,
+        )
 
     def _build_mock_result(self, document_id: str, word_count: int) -> ScoringResult:
         seed = int(hashlib.md5(document_id.encode()).hexdigest(), 16) % 100
