@@ -33,6 +33,7 @@ services:
       - AI_INFERENCE_URL=http://ai_inference:8001
       - KNOWLEDGE_RETRIEVAL_URL=http://knowledge_retrieval:8002
       - PIPELINES_URL=http://pipelines:8003
+      - AGENTS_URL=http://agents:8004
       - POSTGRES_DSN=postgresql://platform:platform@postgres:5432/platform
       - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
       - CORS_ORIGINS=http://localhost:3000
@@ -48,6 +49,27 @@ services:
       - ai_inference
       - knowledge_retrieval
       - pipelines
+      - agents
+    networks:
+      - platform_net
+    restart: unless-stopped
+
+  # ─── Agents Service ────────────────────────────────────────
+  agents:
+    build:
+      context: ../backend/agents
+      dockerfile: Dockerfile
+    ports:
+      - "8004:8004"
+    environment:
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - GUARDRAIL_MODEL=${GUARDRAIL_MODEL:-deepseek-chat}
+      - DRAFTING_MODEL=${DRAFTING_MODEL:-deepseek-chat}
+      - EVAL_MODEL=${EVAL_MODEL:-deepseek-chat}
+      - REFINEMENT_MODEL=${REFINEMENT_MODEL:-deepseek-chat}
+      - KNOWLEDGE_RETRIEVAL_URL=http://knowledge_retrieval:8002
+    depends_on:
+      - knowledge_retrieval
     networks:
       - platform_net
     restart: unless-stopped

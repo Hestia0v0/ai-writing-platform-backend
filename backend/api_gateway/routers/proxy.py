@@ -7,6 +7,7 @@ Service routing:
   hitl/*       → ai_inference:8001/hitl/{path}
   retrieval/*  → knowledge_retrieval:8002/retrieval/{path}
   pipelines/*  → pipelines:8003/{path}   (the "pipelines" segment is stripped)
+  agent/*      → agents:8004/agent/{path}
 """
 
 import logging
@@ -22,6 +23,7 @@ router = APIRouter()
 _INFERENCE_URL = os.getenv("AI_INFERENCE_URL", "http://ai_inference:8001").rstrip("/")
 _RETRIEVAL_URL = os.getenv("KNOWLEDGE_RETRIEVAL_URL", "http://knowledge_retrieval:8002").rstrip("/")
 _PIPELINES_URL = os.getenv("PIPELINES_URL", "http://pipelines:8003").rstrip("/")
+_AGENTS_URL = os.getenv("AGENTS_URL", "http://agents:8004").rstrip("/")
 
 # (base_url, preserve_segment)
 # preserve_segment=True  → forward as  base/{segment}/{path}
@@ -32,6 +34,7 @@ _SERVICE_MAP: dict[str, tuple[str, bool]] = {
     "hitl":      (_INFERENCE_URL, True),
     "retrieval": (_RETRIEVAL_URL, True),
     "pipelines": (_PIPELINES_URL, False),
+    "agent":     (_AGENTS_URL, True),
 }
 
 # Headers that must not be forwarded to/from the upstream.
