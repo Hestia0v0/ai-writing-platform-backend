@@ -12,9 +12,10 @@ ai-writing-platform-backend/
 │   ├── api_gateway/        # Port 8000 — auth, quota, billing proxy
 │   ├── ai_inference/       # Port 8001 — LLM calls, batch cache, HITL queue
 │   ├── knowledge_retrieval/# Port 8002 — vector embeddings, semantic search
-│   └── pipelines/          # Port 8003 — document parsing, workflow orchestration
+│   ├── pipelines/          # Port 8003 — document parsing, workflow orchestration
+│   └── agents/             # Port 8004 — multi-agent AI system (5 agents)
 ├── infrastructure/
-│   ├── docker-compose.yml  # Orchestrates all 7 containers
+│   ├── docker-compose.yml  # Orchestrates all 8 containers
 │   ├── .env.example        # Template for required secrets
 │   └── init.sql            # PostgreSQL schema + pgvector setup
 └── tests/
@@ -65,6 +66,7 @@ PostgreSQL 16          Redis 7
 | `ai_inference` | 8001 | Python 3.12 / FastAPI | DeepSeek LLM inference, prompt batch caching (Redis DB 0), human-in-the-loop review queue, rubric-based grading |
 | `knowledge_retrieval` | 8002 | Python 3.12 / FastAPI | Document embedding (fastembed), HNSW vector index (pgvector), semantic similarity search |
 | `pipelines` | 8003 | Python 3.12 / FastAPI | PDF (pypdf) and DOCX (python-docx) parsing, workflow state management (Redis DB 1) |
+| `agents` | 8004 | Python 3.12 / FastAPI | Multi-agent AI system: Security Guardrail, Drafting, Evaluation Panel (3 concurrent sub-agents), Refinement, Knowledge RAG |
 | `postgres` | 5432 | PostgreSQL 16 | Relational store for users, subscriptions, embeddings, pipeline results |
 | `redis` | 6379 | Redis 7 | Shared cache / queue (DB 0: inference, DB 1: pipelines, DB 2: gateway) |
 
@@ -103,14 +105,15 @@ docker compose up --build
 
 Services will be available at:
 
-| Service | URL |
-|---------|-----|
-| API Gateway | http://localhost:8000 |
-| AI Inference | http://localhost:8001 |
-| Knowledge Retrieval | http://localhost:8002 |
-| Pipelines | http://localhost:8003 |
-| PostgreSQL | localhost:5432 |
-| Redis | localhost:6379 |
+| Service | URL | Swagger UI |
+|---------|-----|-----------|
+| API Gateway | http://localhost:8000 | http://localhost:8000/docs |
+| AI Inference | http://localhost:8001 | http://localhost:8001/docs |
+| Knowledge Retrieval | http://localhost:8002 | http://localhost:8002/docs |
+| Pipelines | http://localhost:8003 | http://localhost:8003/docs |
+| **Agents** | **http://localhost:8004** | **http://localhost:8004/docs** |
+| PostgreSQL | localhost:5458 | — |
+| Redis | localhost:6379 | — |
 
 Interactive API docs (Swagger UI) are served by each FastAPI service at `/docs`.
 
@@ -273,6 +276,17 @@ AI_INFERENCE_URL=http://localhost:8001
 KNOWLEDGE_RETRIEVAL_URL=http://localhost:8002
 ```
 
+**`agents`** — port 8004
+```bash
+DEEPSEEK_API_KEY=<your-key>          # omit to run in mock mode (offline)
+KNOWLEDGE_RETRIEVAL_URL=http://localhost:8002
+# Optional model overrides (all default to deepseek-chat):
+GUARDRAIL_MODEL=deepseek-chat
+DRAFTING_MODEL=deepseek-chat
+EVAL_MODEL=deepseek-chat
+REFINEMENT_MODEL=deepseek-chat
+```
+
 ### Startup Order
 
 Respect inter-service dependencies when running all services locally:
@@ -280,8 +294,9 @@ Respect inter-service dependencies when running all services locally:
 1. `postgres` + `redis` — infrastructure, no dependencies
 2. `ai_inference` (8001) and `knowledge_retrieval` (8002) — independent of each other
 3. `pipelines` (8003) — requires `ai_inference` and `knowledge_retrieval`
-4. `api_gateway` (8000) — requires all three services above
-5. Frontend dev server — requires `api_gateway`
+4. `agents` (8004) — requires `knowledge_retrieval` only (works without API key in mock mode)
+5. `api_gateway` (8000) — requires all services above
+6. Frontend dev server — requires `api_gateway`
 
 ---
 
