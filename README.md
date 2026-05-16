@@ -151,22 +151,45 @@ The local `postgres` container can be replaced with an Alibaba Cloud RDS Postgre
 
   > **Note**: `init.sql` creates an HNSW vector index (`pgvector ≥ 0.5.0` required). Verify the installed plugin version in the RDS console before running.
 
-### 2. Update `infrastructure/.env`
+### 2. Configure the SSL Certificate
 
-Uncomment and fill in the `POSTGRES_DSN` line that was added as a comment:
+Alibaba Cloud RDS enforces SSL by default. Download the CA certificate and place it where Docker can mount it.
+
+1. In the RDS Console, go to **Instance → Data Security → SSL** and download the certificate zip.
+2. Extract the zip — you need the `.pem` file:
+   ```
+   ApsaraDB-CA-Chain.zip
+   ├── ApsaraDB-CA-Chain.pem   ← this one
+   ├── ApsaraDB-CA-Chain.jks
+   └── ApsaraDB-CA-Chain.p7b
+   ```
+3. Copy the `.pem` file into `infrastructure/certs/`:
+   ```bash
+   mkdir -p infrastructure/certs
+   cp ApsaraDB-CA-Chain.pem infrastructure/certs/
+   ```
+
+> **Security**: `infrastructure/certs/` is git-ignored. Never commit certificate files to the repository.
+
+### 3. Update `infrastructure/.env`
+
+Set `POSTGRES_DSN` to point at RDS with SSL verification enabled:
 
 ```env
-# Alibaba Cloud RDS connection string
-POSTGRES_DSN=postgresql://<user>:<password>@rm-xxxx.pg.rds.aliyuncs.com:5432/platform
-# Append ?sslmode=require if RDS enforces SSL (default for most RDS configurations)
+POSTGRES_DSN=postgresql://<user>:<password>@rm-xxxx.pg.rds.aliyuncs.com:5432/platform?sslmode=verify-ca&sslrootcert=/certs/ApsaraDB-CA-Chain.pem
 ```
 
-### 3. Update `docker-compose.yml`
+The `/certs/` path refers to the mount point inside each container (set up in the next step).
 
-Follow the inline `# 阿里云 RDS` comments already present in the file. Three types of changes:
+> If you hit `certificate verify failed`, try `sslmode=require` first (encrypts without chain verification) to confirm connectivity, then switch back to `verify-ca`.
+
+### 4. Update `docker-compose.yml`
+
+Follow the inline `# 阿里云 RDS` comments already present in the file. Four types of changes:
 
 | What | How |
 |------|-----|
+| Add `volumes: - ./certs:/certs:ro` to `api_gateway`, `ai_inference`, `knowledge_retrieval`, `pipelines` | Mounts the certificate into each container |
 | Hardcoded DSN in each service's `environment:` | Replace with `${POSTGRES_DSN}` (or `DATABASE_URL=${POSTGRES_DSN}` for `ai_inference`) |
 | `depends_on: postgres` in each service | Remove the `postgres` entry |
 | Top-level `volumes: postgres_data:` and the entire `postgres:` service block | Delete both |

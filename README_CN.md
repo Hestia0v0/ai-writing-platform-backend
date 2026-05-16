@@ -148,22 +148,45 @@ docker compose down -v    # 同时删除 postgres_data 和 redis_data
 
   > **注意**：`init.sql` 会创建 HNSW 向量索引，要求 `pgvector ≥ 0.5.0`。执行前请在 RDS 控制台确认已安装的插件版本。
 
-### 2. 修改 `infrastructure/.env`
+### 2. 配置 SSL 证书
 
-取消注释并填写已预置的 `POSTGRES_DSN` 行：
+阿里云 RDS 默认强制 SSL 加密连接。需下载 CA 证书并放置到 Docker 可挂载的路径。
+
+1. 在 **RDS 控制台 → 实例 → 数据安全性 → SSL** 页面下载证书压缩包。
+2. 解压后取 `.pem` 文件：
+   ```
+   ApsaraDB-CA-Chain.zip
+   ├── ApsaraDB-CA-Chain.pem   ← 使用此文件
+   ├── ApsaraDB-CA-Chain.jks
+   └── ApsaraDB-CA-Chain.p7b
+   ```
+3. 将 `.pem` 文件复制到 `infrastructure/certs/` 目录：
+   ```bash
+   mkdir -p infrastructure/certs
+   cp ApsaraDB-CA-Chain.pem infrastructure/certs/
+   ```
+
+> **安全提示**：`infrastructure/certs/` 已加入 `.gitignore`，请勿将证书文件提交至代码仓库。
+
+### 3. 修改 `infrastructure/.env`
+
+将 `POSTGRES_DSN` 设置为阿里云 RDS 地址，并启用 SSL 证书验证：
 
 ```env
-# 阿里云 RDS 连接串
-POSTGRES_DSN=postgresql://<用户名>:<密码>@rm-xxxx.pg.rds.aliyuncs.com:5432/platform
-# 若阿里云强制 SSL（大多数 RDS 配置默认开启），末尾加 ?sslmode=require
+POSTGRES_DSN=postgresql://<用户名>:<密码>@rm-xxxx.pg.rds.aliyuncs.com:5432/platform?sslmode=verify-ca&sslrootcert=/certs/ApsaraDB-CA-Chain.pem
 ```
 
-### 3. 修改 `docker-compose.yml`
+其中 `/certs/` 为下一步挂载到各容器内的路径。
 
-按文件中已有的 `# 阿里云 RDS` 行内注释操作，共三类改动：
+> 若连接时报 `certificate verify failed`，可先将 `sslmode=verify-ca` 改为 `sslmode=require`（仅加密，不验证证书链）确认连通性，再切回 `verify-ca`。
+
+### 4. 修改 `docker-compose.yml`
+
+按文件中已有的 `# 阿里云 RDS` 行内注释操作，共四类改动：
 
 | 位置 | 操作 |
 |------|------|
+| 为 `api_gateway`、`ai_inference`、`knowledge_retrieval`、`pipelines` 添加 `volumes: - ./certs:/certs:ro` | 将证书目录只读挂载到各容器 |
 | 各服务 `environment:` 中的硬编码 DSN | 替换为 `${POSTGRES_DSN}`（`ai_inference` 用 `DATABASE_URL=${POSTGRES_DSN}`） |
 | 各服务 `depends_on:` 中的 `postgres` 条目 | 删除 |
 | 顶层 `volumes: postgres_data:` 及整个 `postgres:` 服务块 | 全部删除 |
