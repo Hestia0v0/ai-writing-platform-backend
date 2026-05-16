@@ -2,17 +2,30 @@ name: Deploy Backend
 
 on:
   push:
-    branches: [main]
-  workflow_dispatch:
+    branches:
+      - main
 
 concurrency:
   group: production-deploy
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   deploy:
     name: Deploy to Linux server
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    # Configure these GitHub repository secrets before enabling production deploys:
+    # - SERVER_HOST: public IP address or domain name of the Linux server
+    # - SERVER_USER: SSH username on the Linux server
+    # - SERVER_SSH_KEY: private SSH key with deployment access to the Linux server
+    # - SERVER_PORT: SSH port; optional because this workflow defaults to 22
+    # - PROJECT_PATH: absolute path to the cloned repo on the server
+    env:
+      PROJECT_PATH: ${{ secrets.PROJECT_PATH }}
 
     steps:
       - name: Deploy over SSH
@@ -22,16 +35,15 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           port: ${{ secrets.SERVER_PORT || 22 }}
+          envs: PROJECT_PATH
           script_stop: true
+          command_timeout: 20m
           script: |
-            cd "${{ secrets.PROJECT_PATH }}"
-            git pull --ff-only origin main
+            set -eu
 
-            if command -v docker-compose >/dev/null 2>&1; then
-              COMPOSE="docker-compose"
-            else
-              COMPOSE="docker compose"
-            fi
+            cd "$PROJECT_PATH"
+            git pull origin main
 
-            $COMPOSE -f docker-compose.prod.yml up -d --build
+            docker compose -f docker-compose.prod.yml up -d --build
+
             docker image prune -f
