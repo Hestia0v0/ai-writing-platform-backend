@@ -3,7 +3,6 @@ networks:
     driver: bridge
 
 volumes:
-  postgres_data:  # 阿里云 RDS 方案：删除此行
   redis_data:     # Railway Redis 方案：删除此行
 
 services:
@@ -29,14 +28,14 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
+    volumes:
+      - ./certs:/certs:ro
     environment:
       - AI_INFERENCE_URL=http://ai_inference:8001
       - KNOWLEDGE_RETRIEVAL_URL=http://knowledge_retrieval:8002
       - PIPELINES_URL=http://pipelines:8003
       - AGENTS_URL=http://agents:8004
-      - POSTGRES_DSN=postgresql://platform:platform@postgres:5432/platform
-      # 阿里云 RDS：将上一行替换为：
-      # - POSTGRES_DSN=${POSTGRES_DSN}
+      - POSTGRES_DSN=${POSTGRES_DSN}
       - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
       - CORS_ORIGINS=http://localhost:3000
       - REDIS_URL=redis://redis:6379/2
@@ -48,7 +47,6 @@ services:
       - STRIPE_PRICE_BASIC=${STRIPE_PRICE_BASIC:-}
       - STRIPE_PRICE_PRO=${STRIPE_PRICE_PRO:-}
     depends_on:
-      - postgres  # 阿里云 RDS：删除此行
       - redis     # Railway Redis：删除此行
       - ai_inference
       - knowledge_retrieval
@@ -85,17 +83,16 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8001:8001"
+    volumes:
+      - ./certs:/certs:ro
     environment:
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
       - REDIS_URL=redis://redis:6379/0
       # Railway Redis：将上一行替换为：
       # - REDIS_URL=${REDIS_INFERENCE_URL}
-      - DATABASE_URL=postgresql://platform:platform@postgres:5432/platform
-      # 阿里云 RDS：将上一行替换为：
-      # - DATABASE_URL=${POSTGRES_DSN}
+      - DATABASE_URL=${POSTGRES_DSN}
     depends_on:
       - redis     # Railway Redis：删除此行
-      - postgres  # 阿里云 RDS：删除此行
     networks:
       - platform_net
     restart: unless-stopped
@@ -107,12 +104,10 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8002:8002"
+    volumes:
+      - ./certs:/certs:ro
     environment:
-      - POSTGRES_DSN=postgresql://platform:platform@postgres:5432/platform
-      # 阿里云 RDS：将上一行替换为：
-      # - POSTGRES_DSN=${POSTGRES_DSN}
-    depends_on:
-      - postgres  # 阿里云 RDS：删除此行
+      - POSTGRES_DSN=${POSTGRES_DSN}
     networks:
       - platform_net
     restart: unless-stopped
@@ -124,38 +119,19 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8003:8003"
+    volumes:
+      - ./certs:/certs:ro
     environment:
       - REDIS_URL=redis://redis:6379/1
       # Railway Redis：将上一行替换为：
       # - REDIS_URL=${REDIS_PIPELINES_URL}
       - AI_INFERENCE_URL=http://ai_inference:8001
       - KNOWLEDGE_RETRIEVAL_URL=http://knowledge_retrieval:8002
-      - POSTGRES_DSN=postgresql://platform:platform@postgres:5432/platform
-      # 阿里云 RDS：将上一行替换为：
-      # - POSTGRES_DSN=${POSTGRES_DSN}
+      - POSTGRES_DSN=${POSTGRES_DSN}
     depends_on:
       - redis     # Railway Redis：删除此行
-      - postgres  # 阿里云 RDS：删除此行
       - ai_inference
       - knowledge_retrieval
-    networks:
-      - platform_net
-    restart: unless-stopped
-
-  # ─── PostgreSQL + pgvector ─────────────────────────────────
-  # 阿里云 RDS 方案：删除以下整个 postgres 服务块。
-  # 切换前需在阿里云控制台手动安装 vector 插件，并执行 init.sql 完成建表。
-  postgres:
-    image: pgvector/pgvector:pg16
-    environment:
-      POSTGRES_USER: platform
-      POSTGRES_PASSWORD: platform
-      POSTGRES_DB: platform
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
-    ports:
-      - "5458:5432"
     networks:
       - platform_net
     restart: unless-stopped
