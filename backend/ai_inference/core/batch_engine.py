@@ -53,7 +53,7 @@ class BatchEngine:
     def submit(
         self,
         request: BatchSubmitRequest,
-        hitl_store: Optional[HITLStore],
+        hitl_store: Optional["HITLStore"] = None,  # kept for API compat but unused
     ) -> BatchJobStatus:
         """
         Enqueue a batch job and return a status object immediately.
@@ -75,7 +75,7 @@ class BatchEngine:
         self._jobs[request.job_id] = job
 
         asyncio.create_task(
-            self._run_job(job, request, hitl_store),
+            self._run_job(job, request),
             name=f"batch-{request.job_id}",
         )
         return job
@@ -92,14 +92,13 @@ class BatchEngine:
         self,
         job: BatchJobStatus,
         request: BatchSubmitRequest,
-        hitl_store: Optional[HITLStore],
     ) -> None:
         job.status = "running"
         semaphore = asyncio.Semaphore(request.concurrency)
 
         async def bounded(item: CompositionItem) -> BatchItemResult:
             async with semaphore:
-                return await self._process_item(item, request.model, hitl_store, job)
+                return await self._process_item(item, request.model, job)
 
         results = await asyncio.gather(
             *[bounded(item) for item in request.compositions]
@@ -120,7 +119,6 @@ class BatchEngine:
         self,
         item: CompositionItem,
         model: str,
-        hitl_store: Optional[HITLStore],
         job: BatchJobStatus,
     ) -> BatchItemResult:
         try:
@@ -156,12 +154,21 @@ class BatchEngine:
             self._cache.set(item.text, result)
 
             # ── 4. HITL routing ────────────────────────────────────────────────
-            if result.flagged_for_review and hitl_store is not None:
-                review_item = hitl_store.enqueue(result, item.text)
-                result = result.model_copy(
-                    update={"review_id": review_item.review_id}
-                )
-                job.flagged_for_review += 1
+            # Create a fresh session here — the request-scoped session passed at
+            # submission time is already closed by FastAPI's dependency teardown
+            # before this background task runs.
+            if result.flagged_for_review:
+                from db.database import SessionLocal  # noqa: PLC0415
+                from core.hitl_store import HITLStore  # noqa: PLC0415
+                new_db = SessionLocal()
+                try:
+                    review_item = HITLStore(new_db).enqueue(result, item.text)
+                    result = result.model_copy(
+                        update={"review_id": review_item.review_id}
+                    )
+                    job.flagged_for_review += 1
+                finally:
+                    new_db.close()
 
             job.completed += 1
             return BatchItemResult(
