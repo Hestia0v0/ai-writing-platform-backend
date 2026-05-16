@@ -1,0 +1,104 @@
+services:
+  api_gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE_DIR: backend/api_gateway
+        PORT: 8000
+    ports:
+      - "8000:8000"
+    environment:
+      AI_INFERENCE_URL: http://ai_inference:8001
+      KNOWLEDGE_RETRIEVAL_URL: http://knowledge_retrieval:8002
+      POSTGRES_DSN: ${POSTGRES_DSN:-postgresql://platform:platform@postgres:5432/platform}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      REDIS_URL: redis://redis:6379/0
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_PRICE_BASIC: ${STRIPE_PRICE_BASIC:-}
+      STRIPE_PRICE_PRO: ${STRIPE_PRICE_PRO:-}
+    depends_on:
+      redis:
+        condition: service_started
+      ai_inference:
+        condition: service_started
+      knowledge_retrieval:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - backend_net
+
+  ai_inference:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE_DIR: backend/ai_inference
+        PORT: 8001
+    ports:
+      - "8001:8001"
+    environment:
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://platform:platform@postgres:5432/platform}
+      REDIS_URL: redis://redis:6379/1
+    depends_on:
+      redis:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - backend_net
+
+  knowledge_retrieval:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE_DIR: backend/knowledge_retrieval
+        PORT: 8002
+    ports:
+      - "8002:8002"
+    environment:
+      POSTGRES_DSN: ${POSTGRES_DSN:-postgresql://platform:platform@postgres:5432/platform}
+    restart: unless-stopped
+    networks:
+      - backend_net
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    networks:
+      - backend_net
+
+  # Placeholder only: the current backend code uses PostgreSQL/pgvector drivers.
+  # Keep this here as the future MySQL container shape, but wire the Python code
+  # and environment variables to MySQL before depending on it in production.
+  mysql:
+    image: mysql:8.4
+    profiles:
+      - mysql-placeholder
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-platform}
+      MYSQL_USER: ${MYSQL_USER:-platform}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-change-me}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-change-root-me}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    ports:
+      - "3306:3306"
+    restart: unless-stopped
+    networks:
+      - backend_net
+
+networks:
+  backend_net:
+    driver: bridge
+
+volumes:
+  redis_data:
+  mysql_data:
