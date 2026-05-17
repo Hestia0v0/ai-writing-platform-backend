@@ -1,16 +1,4 @@
-"""
-Drafting & Generation Agent (US-5, US-6)
 
-Generates a structured essay in Chinese or English based on:
-  - Title
-  - Target language (zh / en)
-  - Word count target
-  - Writing framework (five_paragraph / PEEL / 起承转合 / argument_counter)
-  - Optional extra instructions (e.g. "use show-don't-tell throughout")
-
-The system prompt encodes every supported framework so the model
-produces a correctly structured output even without additional context.
-"""
 
 from __future__ import annotations
 
@@ -139,14 +127,13 @@ _TECHNIQUE_BLOCKS_ZH = {
     WritingTechnique.NARRATIVE: """\
 写作技巧 — 叙事写作（贯穿全文）：
 • 构建清晰的故事弧线：起因（触发事件）→ 矛盾升级 → 高潮转折 → 结局收束。
-• 塑造至少一个有明确动机并在全文中经历情感变化的人物。
 • 加入至少两句自然的对话，用以展现人物性格并推动情节发展，并正确使用标点。
 • 以一个具体、生动的场景开篇，立刻将读者带入故事情境。
 • 控制叙事节奏：情感高点放缓节奏（长句 + 感官细节），动作段落加快节奏（短句 + 简洁动词）。
 """,
     WritingTechnique.ARGUMENTATIVE: """\
 写作技巧 — 议论文写作（贯穿全文）：
-• 在开头段最后一句明确表达论点——立场必须清晰、有争议价值。
+• 在开头段最后一句明确表达论点——立场必须清晰。
 • 每个分论点至少提供一项具体证据：统计数据、真实案例或权威观点。
 • 用一整段公正呈现最有力的对立观点，然后以逻辑或证据逐一驳斥。
 • 保持正式、客观的语气——避免个人经历和情绪化措辞；适当使用委婉表达（如「研究表明……」）。
