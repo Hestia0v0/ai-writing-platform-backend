@@ -4,6 +4,9 @@
 #   DOMAIN      Site address. Use :80 for HTTP-only (e.g. server IP).
 #               Set to your public API hostname (e.g. api.example.com) for automatic HTTPS.
 #   ACME_EMAIL  Contact for Let's Encrypt expiry notices (recommended when using a domain).
+101.200.88.51.nip.io {
+    reverse_proxy api_gateway:8000
+}
 
 {
 	email {$ACME_EMAIL}
