@@ -28,6 +28,8 @@ services:
       knowledge_retrieval:
         condition: service_started
     restart: unless-stopped
+    volumes:
+      - ./infrastructure/certs:/certs
     networks:
       - backend_net
 
@@ -48,6 +50,8 @@ services:
       redis:
         condition: service_started
     restart: unless-stopped
+    volumes:
+      - ./infrastructure/certs:/certs
     networks:
       - backend_net
 
@@ -63,6 +67,8 @@ services:
     environment:
       POSTGRES_DSN: ${POSTGRES_DSN:?POSTGRES_DSN is required}
     restart: unless-stopped
+    volumes:
+      - ./infrastructure/certs:/certs
     networks:
       - backend_net
 
