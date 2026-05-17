@@ -10,9 +10,5 @@
         format console
     }
 
-    reverse_proxy api_gateway:8000 {
-        health_uri /health/
-        health_interval 30s
-        health_timeout 5s
-    }
+    reverse_proxy api_gateway:8000
 }
