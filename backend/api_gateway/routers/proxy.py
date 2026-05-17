@@ -46,6 +46,9 @@ _DROP_RESP = frozenset({"content-encoding", "content-length", "transfer-encoding
 
 async def _forward(request: Request, url: str) -> Response:
     headers = {k: v for k, v in request.headers.items() if k.lower() not in _DROP_REQ}
+    # Inject the authenticated user identity so internal services don't need to re-validate JWT
+    if hasattr(request.state, "user_id"):
+        headers["X-User-Id"] = request.state.user_id
     body = await request.body()
 
     try:

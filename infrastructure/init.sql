@@ -19,11 +19,14 @@ CREATE INDEX IF NOT EXISTS idx_embeddings_hnsw
 -- ── Pipelines ────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS pipeline_results (
     document_id TEXT        PRIMARY KEY,
+    user_id     TEXT        NOT NULL DEFAULT 'unknown',
     filename    TEXT        NOT NULL,
     status      TEXT        NOT NULL,
     result_json JSONB       NOT NULL,
     created_at  TIMESTAMPTZ DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS idx_pipeline_results_user_id ON pipeline_results (user_id);
 
 -- ── Users (API Gateway auth) ─────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS users (
