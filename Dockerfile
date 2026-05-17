@@ -20,8 +20,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY ${SERVICE_DIR}/requirements.txt /tmp/requirements.txt
-RUN python -m pip install --upgrade pip \
-    && pip install -r /tmp/requirements.txt
+RUN python -m pip install --upgrade pip -i https://mirrors.aliyun.com/pypi/simple/ \
+    && pip install -r /tmp/requirements.txt -i https://mirrors.aliyun.com/pypi/simple/
 
 COPY ${SERVICE_DIR}/ /app/
 
