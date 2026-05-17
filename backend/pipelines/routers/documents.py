@@ -1,7 +1,7 @@
 import json
 import os
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, status
+from fastapi import APIRouter, Header, HTTPException, UploadFile, File, status
 from fastapi.responses import JSONResponse
 
 from doc_processor import (
@@ -25,19 +25,21 @@ _processor = DocumentProcessor(
 )
 
 
-async def _save(result: PipelineResult) -> None:
+async def _save(result: PipelineResult, user_id: str) -> None:
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute(
             """
-            INSERT INTO pipeline_results (document_id, filename, status, result_json)
-            VALUES ($1, $2, $3, $4)
+            INSERT INTO pipeline_results (document_id, user_id, filename, status, result_json)
+            VALUES ($1, $2, $3, $4, $5)
             ON CONFLICT (document_id) DO UPDATE
-                SET filename    = EXCLUDED.filename,
+                SET user_id     = EXCLUDED.user_id,
+                    filename    = EXCLUDED.filename,
                     status      = EXCLUDED.status,
                     result_json = EXCLUDED.result_json
             """,
             result.document_id,
+            user_id,
             result.filename,
             result.status,
             json.dumps(result.model_dump()),
@@ -56,11 +58,12 @@ async def _load(document_id: str) -> PipelineResult | None:
     return PipelineResult(**json.loads(row["result_json"]))
 
 
-async def _list_ids() -> list[str]:
+async def _list_ids(user_id: str) -> list[str]:
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT document_id FROM pipeline_results ORDER BY created_at DESC"
+            "SELECT document_id FROM pipeline_results WHERE user_id = $1 ORDER BY created_at DESC",
+            user_id,
         )
     return [row["document_id"] for row in rows]
 
@@ -71,7 +74,10 @@ async def _list_ids() -> list[str]:
     status_code=status.HTTP_200_OK,
     summary="Upload and process a document through the full pipeline",
 )
-async def process_document(file: UploadFile = File(...)) -> PipelineResult:
+async def process_document(
+    file: UploadFile = File(...),
+    x_user_id: str = Header(default="unknown"),
+) -> PipelineResult:
     if not file.filename:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No filename provided.")
 
@@ -87,7 +93,7 @@ async def process_document(file: UploadFile = File(...)) -> PipelineResult:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is empty.")
 
     result = await _processor.process(filename=file.filename, content=content)
-    await _save(result)
+    await _save(result, x_user_id)
 
     if result.status == "failed":
         return JSONResponse(
@@ -113,6 +119,6 @@ async def get_document_result(document_id: str) -> PipelineResult:
 
 
 @router.get("/", summary="List all processed document IDs")
-async def list_documents() -> dict:
-    ids = await _list_ids()
+async def list_documents(x_user_id: str = Header(default="unknown")) -> dict:
+    ids = await _list_ids(x_user_id)
     return {"document_ids": ids, "count": len(ids)}
