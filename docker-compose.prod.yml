@@ -81,9 +81,16 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:-:80}
+      ACME_EMAIL: ${ACME_EMAIL:-}
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api_gateway:
+        condition: service_started
     networks:
       - backend_net
 
@@ -94,3 +101,4 @@ networks:
 volumes:
   redis_data:
   caddy_data:
+  caddy_config:
