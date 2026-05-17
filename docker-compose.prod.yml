@@ -72,6 +72,23 @@ services:
     networks:
       - backend_net
 
+  pipelines:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE_DIR: backend/pipelines
+        PORT: 8003
+    ports:
+      - "8003:8003"
+    environment:
+      POSTGRES_DSN: ${POSTGRES_DSN:?POSTGRES_DSN is required}
+    restart: unless-stopped
+    volumes:
+      - ./infrastructure/certs:/certs
+    networks:
+      - backend_net
+
   redis:
     image: redis:7-alpine
     command: ["redis-server", "--appendonly", "yes"]
