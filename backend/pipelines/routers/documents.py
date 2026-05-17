@@ -1,13 +1,19 @@
 import json
 import os
+import re
+from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException, UploadFile, File, status
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from doc_processor import (
     AIInferenceClient,
     DocumentProcessor,
+    FeedbackItem,
     PipelineResult,
+    PipelineStage,
+    ScoringResult,
     SUPPORTED_EXTENSIONS,
 )
 from db import get_pool
@@ -15,6 +21,32 @@ from db import get_pool
 router = APIRouter()
 
 _USE_MOCK = os.getenv("AI_INFERENCE_MOCK", "false").lower() == "true"
+
+_DIM_TO_CATEGORY = {
+    "content": "evidence",
+    "organization": "structure",
+    "language": "clarity",
+    "conventions": "grammar",
+}
+
+
+class _RubricItem(BaseModel):
+    dimension: str
+    score: float
+    feedback: str = ""
+
+
+class EditorRecordRequest(BaseModel):
+    document_id: str
+    text: str
+    score: float
+    grade: str
+    rubric: Optional[list[_RubricItem]] = None
+    overall_feedback: str = ""
+    improvement_tips: list[str] = []
+    model_used: str = "unknown"
+
+
 _INFERENCE_URL = os.getenv("AI_INFERENCE_URL", "http://ai_inference:8001")
 
 _processor = DocumentProcessor(
@@ -100,6 +132,55 @@ async def process_document(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             content=result.model_dump(),
         )
+    return result
+
+
+@router.post(
+    "/record",
+    response_model=PipelineResult,
+    status_code=status.HTTP_200_OK,
+    summary="Save an editor grading session to the document history without re-running the pipeline",
+)
+async def record_editor_result(
+    req: EditorRecordRequest,
+    x_user_id: str = Header(default="unknown"),
+) -> PipelineResult:
+    feedback_items: list[FeedbackItem] = []
+    for i, r in enumerate(req.rubric or []):
+        tip = req.improvement_tips[i] if i < len(req.improvement_tips) else ""
+        ratio = r.score / 25.0
+        severity = "info" if ratio >= 0.75 else ("warning" if ratio >= 0.5 else "error")
+        feedback_items.append(FeedbackItem(
+            category=_DIM_TO_CATEGORY.get(r.dimension, r.dimension),
+            severity=severity,
+            message=r.feedback,
+            suggestion=tip,
+        ))
+
+    words = req.text.split()
+    first_words = " ".join(words[:6])
+    safe_name = re.sub(r'[<>:"/\\|?*\n\r]', "", first_words)[:40].strip() or "editor-draft"
+    filename = f"{safe_name}.txt"
+
+    scoring = ScoringResult(
+        document_id=req.document_id,
+        score=req.score,
+        grade=req.grade,
+        feedback=feedback_items,
+        summary=req.overall_feedback,
+        model_used=req.model_used,
+    )
+    result = PipelineResult(
+        document_id=req.document_id,
+        filename=filename,
+        status="success",
+        stage_reached=PipelineStage.COMPLETE,
+        word_count=len(words),
+        chunk_count=1,
+        scoring=scoring,
+        processing_time_ms=0.0,
+    )
+    await _save(result, x_user_id)
     return result
 
 
