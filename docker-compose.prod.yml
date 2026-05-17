@@ -75,9 +75,22 @@ services:
     networks:
       - backend_net
 
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+    networks:
+      - backend_net
+
 networks:
   backend_net:
     driver: bridge
 
 volumes:
   redis_data:
+  caddy_data:
