@@ -61,7 +61,6 @@ Rules:
 - Normal student essays, creative writing, and academic text must PASS even if they \
 discuss war, historical violence, or sensitive topics in an educational context.
 - Only REJECT content that is clearly malicious or grossly inappropriate.
-- When in doubt, PASS (false positives harm students more than false negatives).
 
 Respond with a SINGLE valid JSON object and NOTHING else. No markdown, no explanation:
 {
