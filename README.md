@@ -60,24 +60,28 @@ PostgreSQL 16          Redis 7
 
 ### Services
 
-| Service | Port | Language | Responsibilities |
-|---------|------|----------|-----------------|
-| `api_gateway` | 8000 | Python 3.12 / FastAPI | Single entry point, JWT auth, daily quota enforcement (10 free / 100 basic / unlimited pro), Stripe webhooks |
-| `ai_inference` | 8001 | Python 3.12 / FastAPI | DeepSeek LLM inference, prompt batch caching (Redis DB 0), human-in-the-loop review queue, rubric-based grading |
-| `knowledge_retrieval` | 8002 | Python 3.12 / FastAPI | Document embedding (fastembed), HNSW vector index (pgvector), semantic similarity search |
-| `pipelines` | 8003 | Python 3.12 / FastAPI | PDF (pypdf) and DOCX (python-docx) parsing, workflow state management (Redis DB 1) |
-| `agents` | 8004 | Python 3.12 / FastAPI | Multi-agent AI system: Security Guardrail, Drafting, Evaluation Panel (3 concurrent sub-agents), Refinement, Knowledge RAG |
-| `postgres` | 5432 | PostgreSQL 16 | Relational store for users, subscriptions, embeddings, pipeline results |
-| `redis` | 6379 | Redis 7 | Shared cache / queue (DB 0: inference, DB 1: pipelines, DB 2: gateway) |
+
+| Service               | Port | Language              | Responsibilities                                                                                                           |
+| --------------------- | ---- | --------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `api_gateway`         | 8000 | Python 3.12 / FastAPI | Single entry point, JWT auth, daily quota enforcement (10 free / 100 basic / unlimited pro), Stripe webhooks               |
+| `ai_inference`        | 8001 | Python 3.12 / FastAPI | DeepSeek LLM inference, prompt batch caching (Redis DB 0), human-in-the-loop review queue, rubric-based grading            |
+| `knowledge_retrieval` | 8002 | Python 3.12 / FastAPI | Document embedding (fastembed), HNSW vector index (pgvector), semantic similarity search                                   |
+| `pipelines`           | 8003 | Python 3.12 / FastAPI | PDF (pypdf) and DOCX (python-docx) parsing, workflow state management (Redis DB 1)                                         |
+| `agents`              | 8004 | Python 3.12 / FastAPI | Multi-agent AI system: Security Guardrail, Drafting, Evaluation Panel (3 concurrent sub-agents), Refinement, Knowledge RAG |
+| `postgres`            | 5432 | PostgreSQL 16         | Relational store for users, subscriptions, embeddings, pipeline results                                                    |
+| `redis`               | 6379 | Redis 7               | Shared cache / queue (DB 0: inference, DB 1: pipelines, DB 2: gateway)                                                     |
+
 
 ### Database Schema (init.sql)
 
-| Table | Purpose |
-|-------|---------|
-| `users` | Identity and JWT credentials |
-| `subscriptions` | Stripe plan tracking (free / basic / pro) |
+
+| Table                 | Purpose                                            |
+| --------------------- | -------------------------------------------------- |
+| `users`               | Identity and JWT credentials                       |
+| `subscriptions`       | Stripe plan tracking (free / basic / pro)          |
 | `document_embeddings` | Vector columns with HNSW index for fast ANN search |
-| `pipeline_results` | Workflow outputs and status |
+| `pipeline_results`    | Workflow outputs and status                        |
+
 
 ---
 
@@ -105,15 +109,17 @@ docker compose up --build
 
 Services will be available at:
 
-| Service | URL | Swagger UI |
-|---------|-----|-----------|
-| API Gateway | http://localhost:8000 | http://localhost:8000/docs |
-| AI Inference | http://localhost:8001 | http://localhost:8001/docs |
-| Knowledge Retrieval | http://localhost:8002 | http://localhost:8002/docs |
-| Pipelines | http://localhost:8003 | http://localhost:8003/docs |
-| **Agents** | **http://localhost:8004** | **http://localhost:8004/docs** |
-| PostgreSQL | localhost:5458 | — |
-| Redis | localhost:6379 | — |
+
+| Service             | URL                                                | Swagger UI                                                   |
+| ------------------- | -------------------------------------------------- | ------------------------------------------------------------ |
+| API Gateway         | [http://localhost:8000](http://localhost:8000)     | [http://localhost:8000/docs](http://localhost:8000/docs)     |
+| AI Inference        | [http://localhost:8001](http://localhost:8001)     | [http://localhost:8001/docs](http://localhost:8001/docs)     |
+| Knowledge Retrieval | [http://localhost:8002](http://localhost:8002)     | [http://localhost:8002/docs](http://localhost:8002/docs)     |
+| Pipelines           | [http://localhost:8003](http://localhost:8003)     | [http://localhost:8003/docs](http://localhost:8003/docs)     |
+| **Agents**          | **[http://localhost:8004](http://localhost:8004)** | **[http://localhost:8004/docs](http://localhost:8004/docs)** |
+| PostgreSQL          | localhost:5458                                     | —                                                            |
+| Redis               | localhost:6379                                     | —                                                            |
+
 
 Interactive API docs (Swagger UI) are served by each FastAPI service at `/docs`.
 
@@ -143,12 +149,10 @@ The local `postgres` container can be replaced with an Alibaba Cloud RDS Postgre
 - **pgvector plugin**: Go to **RDS Console → Instance → Plugin Management**, search for `vector`, and install it. The `knowledge_retrieval` service will fail to start if this plugin is missing.
 - **Network**: Add your server IP to the RDS whitelist, or use VPC private access.
 - **Schema**: The automatic `init.sql` mount used by the Docker container will not run against RDS. Connect to the instance and execute `infrastructure/init.sql` once manually:
-
   ```bash
   psql "postgresql://<user>:<password>@rm-xxxx.pg.rds.aliyuncs.com:5432/platform" \
     -f infrastructure/init.sql
   ```
-
   > **Note**: `init.sql` creates an HNSW vector index (`pgvector ≥ 0.5.0` required). Verify the installed plugin version in the RDS console before running.
 
 ### 2. Configure the SSL Certificate
@@ -157,17 +161,17 @@ Alibaba Cloud RDS enforces SSL by default. Download the CA certificate and place
 
 1. In the RDS Console, go to **Instance → Data Security → SSL** and download the certificate zip.
 2. Extract the zip — you need the `.pem` file:
-   ```
+  ```
    ApsaraDB-CA-Chain.zip
    ├── ApsaraDB-CA-Chain.pem   ← this one
    ├── ApsaraDB-CA-Chain.jks
    └── ApsaraDB-CA-Chain.p7b
-   ```
+  ```
 3. Copy the `.pem` file into `infrastructure/certs/`:
-   ```bash
+  ```bash
    mkdir -p infrastructure/certs
    cp ApsaraDB-CA-Chain.pem infrastructure/certs/
-   ```
+  ```
 
 > **Security**: `infrastructure/certs/` is git-ignored. Never commit certificate files to the repository.
 
@@ -187,12 +191,14 @@ The `/certs/` path refers to the mount point inside each container (set up in th
 
 Follow the inline `# 阿里云 RDS` comments already present in the file. Four types of changes:
 
-| What | How |
-|------|-----|
-| Add `volumes: - ./certs:/certs:ro` to `api_gateway`, `ai_inference`, `knowledge_retrieval`, `pipelines` | Mounts the certificate into each container |
-| Hardcoded DSN in each service's `environment:` | Replace with `${POSTGRES_DSN}` (or `DATABASE_URL=${POSTGRES_DSN}` for `ai_inference`) |
-| `depends_on: postgres` in each service | Remove the `postgres` entry |
-| Top-level `volumes: postgres_data:` and the entire `postgres:` service block | Delete both |
+
+| What                                                                                                    | How                                                                                   |
+| ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Add `volumes: - ./certs:/certs:ro` to `api_gateway`, `ai_inference`, `knowledge_retrieval`, `pipelines` | Mounts the certificate into each container                                            |
+| Hardcoded DSN in each service's `environment:`                                                          | Replace with `${POSTGRES_DSN}` (or `DATABASE_URL=${POSTGRES_DSN}` for `ai_inference`) |
+| `depends_on: postgres` in each service                                                                  | Remove the `postgres` entry                                                           |
+| Top-level `volumes: postgres_data:` and the entire `postgres:` service block                            | Delete both                                                                           |
+
 
 After the changes, `docker compose up --build` will start all services pointing at RDS — the local `postgres` container is gone.
 
@@ -223,11 +229,13 @@ REDIS_GATEWAY_URL=redis://default:<password>@<host>.railway.app:<port>/2
 
 Follow the inline `# Railway Redis` comments already present in the file. Three types of changes:
 
-| What | How |
-|------|-----|
-| `REDIS_URL=redis://redis:6379/X` in each service's `environment:` | Replace with the matching `${REDIS_*_URL}` variable |
-| `- redis` in each service's `depends_on:` | Remove the `redis` entry |
-| Top-level `volumes: redis_data:` and the entire `redis:` service block | Delete both |
+
+| What                                                                   | How                                                 |
+| ---------------------------------------------------------------------- | --------------------------------------------------- |
+| `REDIS_URL=redis://redis:6379/X` in each service's `environment:`      | Replace with the matching `${REDIS_*_URL}` variable |
+| `- redis` in each service's `depends_on:`                              | Remove the `redis` entry                            |
+| Top-level `volumes: redis_data:` and the entire `redis:` service block | Delete both                                         |
+
 
 After the changes, run `docker compose up --build` — all services will connect to Railway Redis and the local container will no longer start.
 
@@ -268,7 +276,8 @@ uvicorn main:app --reload --port <port>
 
 ### Environment Variables per Service
 
-**`api_gateway`** — port 8000
+`**api_gateway**` — port 8000
+
 ```bash
 JWT_SECRET=dev-secret-change-in-prod
 POSTGRES_DSN=postgresql://platform:platform@localhost:5458/platform
@@ -279,19 +288,22 @@ KNOWLEDGE_RETRIEVAL_URL=http://localhost:8002
 PIPELINES_URL=http://localhost:8003
 ```
 
-**`ai_inference`** — port 8001
+`**ai_inference**` — port 8001
+
 ```bash
 DEEPSEEK_API_KEY=<your-key>
 REDIS_URL=redis://localhost:6379/0
 DATABASE_URL=postgresql://platform:platform@localhost:5458/platform
 ```
 
-**`knowledge_retrieval`** — port 8002
+`**knowledge_retrieval**` — port 8002
+
 ```bash
 POSTGRES_DSN=postgresql://platform:platform@localhost:5458/platform
 ```
 
-**`pipelines`** — port 8003
+`**pipelines**` — port 8003
+
 ```bash
 REDIS_URL=redis://localhost:6379/1
 POSTGRES_DSN=postgresql://platform:platform@localhost:5458/platform
@@ -299,7 +311,8 @@ AI_INFERENCE_URL=http://localhost:8001
 KNOWLEDGE_RETRIEVAL_URL=http://localhost:8002
 ```
 
-**`agents`** — port 8004
+`**agents**` — port 8004
+
 ```bash
 DEEPSEEK_API_KEY=<your-key>          # omit to run in mock mode (offline)
 KNOWLEDGE_RETRIEVAL_URL=http://localhost:8002
@@ -327,17 +340,19 @@ Respect inter-service dependencies when running all services locally:
 
 Copy `.env.example` to `.env` in the `infrastructure/` directory and fill in the values.
 
-| Variable | Description |
-|----------|-------------|
-| `DEEPSEEK_API_KEY` | API key for the DeepSeek LLM |
-| `POSTGRES_USER` | PostgreSQL username (default: `platform`) |
-| `POSTGRES_PASSWORD` | PostgreSQL password |
-| `POSTGRES_DB` | Database name (default: `platform`) |
-| `REDIS_URL` | Redis connection string (default: `redis://redis:6379/0`) |
-| `STRIPE_SECRET_KEY` | Stripe secret key (`sk_live_…` or `sk_test_…`) |
-| `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret (`whsec_…`) |
-| `STRIPE_PRICE_BASIC` | Stripe Price ID for the Basic plan |
-| `STRIPE_PRICE_PRO` | Stripe Price ID for the Pro plan |
+
+| Variable                | Description                                               |
+| ----------------------- | --------------------------------------------------------- |
+| `DEEPSEEK_API_KEY`      | API key for the DeepSeek LLM                              |
+| `POSTGRES_USER`         | PostgreSQL username (default: `platform`)                 |
+| `POSTGRES_PASSWORD`     | PostgreSQL password                                       |
+| `POSTGRES_DB`           | Database name (default: `platform`)                       |
+| `REDIS_URL`             | Redis connection string (default: `redis://redis:6379/0`) |
+| `STRIPE_SECRET_KEY`     | Stripe secret key (`sk_live_…` or `sk_test_…`)            |
+| `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret (`whsec_…`)                 |
+| `STRIPE_PRICE_BASIC`    | Stripe Price ID for the Basic plan                        |
+| `STRIPE_PRICE_PRO`      | Stripe Price ID for the Pro plan                          |
+
 
 ---
 
@@ -367,12 +382,14 @@ In CI, the full suite runs via GitHub Actions on every push to `main` or `develo
 
 The `.github/workflows/ci.yml` workflow contains four jobs:
 
-| Job | Trigger | Steps |
-|-----|---------|-------|
-| `test-backend` | All pushes | pytest unit tests for all 4 services |
-| `build-frontend` | All pushes | ESLint + Vite production build |
-| `build-docker` | All pushes | Docker image build smoke test for all services |
+
+| Job                 | Trigger             | Steps                                             |
+| ------------------- | ------------------- | ------------------------------------------------- |
+| `test-backend`      | All pushes          | pytest unit tests for all 4 services              |
+| `build-frontend`    | All pushes          | ESLint + Vite production build                    |
+| `build-docker`      | All pushes          | Docker image build smoke test for all services    |
 | `integration-tests` | Push to `main` only | Full `docker compose up` + integration test suite |
+
 
 ---
 
@@ -390,3 +407,5 @@ Each service follows the same layout:
 ├── db/                # ORM models and session management
 └── scripts/           # One-off admin scripts (knowledge_retrieval only)
 ```
+
+2026
