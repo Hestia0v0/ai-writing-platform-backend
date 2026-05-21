@@ -408,4 +408,4 @@ Each service follows the same layout:
 └── scripts/           # One-off admin scripts (knowledge_retrieval only)
 ```
 
-2026
+- 2026-05-21: CI/CD Proof Video Demonstration Trigger.
