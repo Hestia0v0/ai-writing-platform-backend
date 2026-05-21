@@ -130,6 +130,106 @@ docker compose down -v    # 同时删除 postgres_data 和 redis_data
 
 ---
 
+## 切换至阿里云 RDS
+
+本地 `postgres` 容器可直接替换为阿里云 RDS PostgreSQL 实例，无需修改任何业务代码——只需改动 `infrastructure/.env` 和 `docker-compose.yml`。
+
+### 1. 准备 RDS 实例
+
+- **版本**：PostgreSQL 14 或 16（与当前 `pgvector/pgvector:pg16` 镜像一致）。
+- **pgvector 插件**：进入 **RDS 控制台 → 实例 → 插件管理**，搜索 `vector` 并安装。若插件缺失，`knowledge_retrieval` 服务将无法启动。
+- **网络**：将服务器 IP 加入 RDS 白名单，或配置为 VPC 内网访问。
+- **表结构初始化**：Docker 容器会自动挂载 `init.sql`，但 RDS 不会自动执行。需手动连接实例执行一次：
+
+  ```bash
+  psql "postgresql://<用户名>:<密码>@rm-xxxx.pg.rds.aliyuncs.com:5432/platform" \
+    -f infrastructure/init.sql
+  ```
+
+  > **注意**：`init.sql` 会创建 HNSW 向量索引，要求 `pgvector ≥ 0.5.0`。执行前请在 RDS 控制台确认已安装的插件版本。
+
+### 2. 配置 SSL 证书
+
+阿里云 RDS 默认强制 SSL 加密连接。需下载 CA 证书并放置到 Docker 可挂载的路径。
+
+1. 在 **RDS 控制台 → 实例 → 数据安全性 → SSL** 页面下载证书压缩包。
+2. 解压后取 `.pem` 文件：
+   ```
+   ApsaraDB-CA-Chain.zip
+   ├── ApsaraDB-CA-Chain.pem   ← 使用此文件
+   ├── ApsaraDB-CA-Chain.jks
+   └── ApsaraDB-CA-Chain.p7b
+   ```
+3. 将 `.pem` 文件复制到 `infrastructure/certs/` 目录：
+   ```bash
+   mkdir -p infrastructure/certs
+   cp ApsaraDB-CA-Chain.pem infrastructure/certs/
+   ```
+
+> **安全提示**：`infrastructure/certs/` 已加入 `.gitignore`，请勿将证书文件提交至代码仓库。
+
+### 3. 修改 `infrastructure/.env`
+
+将 `POSTGRES_DSN` 设置为阿里云 RDS 地址，并启用 SSL 证书验证：
+
+```env
+POSTGRES_DSN=postgresql://<用户名>:<密码>@rm-xxxx.pg.rds.aliyuncs.com:5432/platform?sslmode=verify-ca&sslrootcert=/certs/ApsaraDB-CA-Chain.pem
+```
+
+其中 `/certs/` 为下一步挂载到各容器内的路径。
+
+> 若连接时报 `certificate verify failed`，可先将 `sslmode=verify-ca` 改为 `sslmode=require`（仅加密，不验证证书链）确认连通性，再切回 `verify-ca`。
+
+### 4. 修改 `docker-compose.yml`
+
+按文件中已有的 `# 阿里云 RDS` 行内注释操作，共四类改动：
+
+| 位置 | 操作 |
+|------|------|
+| 为 `api_gateway`、`ai_inference`、`knowledge_retrieval`、`pipelines` 添加 `volumes: - ./certs:/certs:ro` | 将证书目录只读挂载到各容器 |
+| 各服务 `environment:` 中的硬编码 DSN | 替换为 `${POSTGRES_DSN}`（`ai_inference` 用 `DATABASE_URL=${POSTGRES_DSN}`） |
+| 各服务 `depends_on:` 中的 `postgres` 条目 | 删除 |
+| 顶层 `volumes: postgres_data:` 及整个 `postgres:` 服务块 | 全部删除 |
+
+改完后执行 `docker compose up --build`，所有服务将指向 RDS 实例，本地 `postgres` 容器不再启动。
+
+---
+
+## 切换至 Railway Redis
+
+本地 `redis` 容器可直接替换为 [Railway](https://railway.app) 托管的 Redis 实例，无需修改任何业务代码——只需改动 `infrastructure/.env` 和 `docker-compose.yml`。
+
+### 1. 在 Railway 创建 Redis 服务
+
+1. 打开 Railway 项目 → **New Service → Database → Redis**。
+2. 部署完成后，进入该服务 → **Connect** 标签页 → 复制 **Redis URL**（格式：`redis://default:<密码>@<host>.railway.app:<端口>`）。
+
+### 2. 修改 `infrastructure/.env`
+
+取消注释并填写三条 `REDIS_*_URL`（各对应一个逻辑库）：
+
+```env
+REDIS_INFERENCE_URL=redis://default:<密码>@<host>.railway.app:<端口>/0
+REDIS_PIPELINES_URL=redis://default:<密码>@<host>.railway.app:<端口>/1
+REDIS_GATEWAY_URL=redis://default:<密码>@<host>.railway.app:<端口>/2
+```
+
+> **说明**：三条连接串的主机和密码完全相同，仅末尾的 `/0`、`/1`、`/2` 不同。Railway Redis 使用标准（非集群）模式，支持逻辑库 0–15。
+
+### 3. 修改 `docker-compose.yml`
+
+按文件中已有的 `# Railway Redis` 行内注释操作，共三类改动：
+
+| 位置 | 操作 |
+|------|------|
+| 各服务 `environment:` 中的 `REDIS_URL=redis://redis:6379/X` | 替换为对应的 `${REDIS_*_URL}` 变量 |
+| 各服务 `depends_on:` 中的 `- redis` 条目 | 删除 |
+| 顶层 `volumes: redis_data:` 及整个 `redis:` 服务块 | 全部删除 |
+
+改完后执行 `docker compose up --build`，所有服务将连接 Railway Redis，本地 `redis` 容器不再启动。
+
+---
+
 ## 独立服务开发
 
 在不启动完整 Docker Compose 的情况下，单独运行某个微服务——适合只修改某一服务时快速迭代。

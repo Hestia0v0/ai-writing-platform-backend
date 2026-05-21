@@ -3,8 +3,7 @@ networks:
     driver: bridge
 
 volumes:
-  postgres_data:
-  redis_data:
+  redis_data:     # Railway Redis 方案：删除此行
 
 services:
   # ─── Frontend ──────────────────────────────────────────────
@@ -29,25 +28,50 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
+    volumes:
+      - ./certs:/certs:ro
     environment:
       - AI_INFERENCE_URL=http://ai_inference:8001
       - KNOWLEDGE_RETRIEVAL_URL=http://knowledge_retrieval:8002
       - PIPELINES_URL=http://pipelines:8003
-      - POSTGRES_DSN=postgresql://platform:platform@postgres:5432/platform
+      - AGENTS_URL=http://agents:8004
+      - POSTGRES_DSN=${POSTGRES_DSN}
       - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
       - CORS_ORIGINS=http://localhost:3000
       - REDIS_URL=redis://redis:6379/2
+      # Railway Redis：将上一行替换为：
+      # - REDIS_URL=${REDIS_GATEWAY_URL}
       - FRONTEND_URL=http://localhost:3000
       - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
       - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
       - STRIPE_PRICE_BASIC=${STRIPE_PRICE_BASIC:-}
       - STRIPE_PRICE_PRO=${STRIPE_PRICE_PRO:-}
     depends_on:
-      - postgres
-      - redis
+      - redis     # Railway Redis：删除此行
       - ai_inference
       - knowledge_retrieval
       - pipelines
+      - agents
+    networks:
+      - platform_net
+    restart: unless-stopped
+
+  # ─── Agents Service ────────────────────────────────────────
+  agents:
+    build:
+      context: ../backend/agents
+      dockerfile: Dockerfile
+    ports:
+      - "8004:8004"
+    environment:
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - GUARDRAIL_MODEL=${GUARDRAIL_MODEL:-deepseek-chat}
+      - DRAFTING_MODEL=${DRAFTING_MODEL:-deepseek-chat}
+      - EVAL_MODEL=${EVAL_MODEL:-deepseek-chat}
+      - REFINEMENT_MODEL=${REFINEMENT_MODEL:-deepseek-chat}
+      - KNOWLEDGE_RETRIEVAL_URL=http://knowledge_retrieval:8002
+    depends_on:
+      - knowledge_retrieval
     networks:
       - platform_net
     restart: unless-stopped
@@ -59,13 +83,16 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8001:8001"
+    volumes:
+      - ./certs:/certs:ro
     environment:
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
       - REDIS_URL=redis://redis:6379/0
-      - DATABASE_URL=postgresql://platform:platform@postgres:5432/platform
+      # Railway Redis：将上一行替换为：
+      # - REDIS_URL=${REDIS_INFERENCE_URL}
+      - DATABASE_URL=${POSTGRES_DSN}
     depends_on:
-      - redis
-      - postgres
+      - redis     # Railway Redis：删除此行
     networks:
       - platform_net
     restart: unless-stopped
@@ -77,10 +104,10 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8002:8002"
+    volumes:
+      - ./certs:/certs:ro
     environment:
-      - POSTGRES_DSN=postgresql://platform:platform@postgres:5432/platform
-    depends_on:
-      - postgres
+      - POSTGRES_DSN=${POSTGRES_DSN}
     networks:
       - platform_net
     restart: unless-stopped
@@ -92,36 +119,27 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8003:8003"
+    volumes:
+      - ./certs:/certs:ro
     environment:
       - REDIS_URL=redis://redis:6379/1
+      # Railway Redis：将上一行替换为：
+      # - REDIS_URL=${REDIS_PIPELINES_URL}
       - AI_INFERENCE_URL=http://ai_inference:8001
       - KNOWLEDGE_RETRIEVAL_URL=http://knowledge_retrieval:8002
-      - POSTGRES_DSN=postgresql://platform:platform@postgres:5432/platform
+      - POSTGRES_DSN=${POSTGRES_DSN}
     depends_on:
-      - redis
-      - postgres
+      - redis     # Railway Redis：删除此行
       - ai_inference
       - knowledge_retrieval
     networks:
       - platform_net
     restart: unless-stopped
 
-  # ─── PostgreSQL + pgvector ─────────────────────────────────
-  postgres:
-    image: pgvector/pgvector:pg16
-    environment:
-      POSTGRES_USER: platform
-      POSTGRES_PASSWORD: platform
-      POSTGRES_DB: platform
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
-    ports:
-      - "5458:5432"
-    networks:
-      - platform_net
-    restart: unless-stopped
-
+  # ─── Redis ────────────────────────────────────────────────
+  # Railway Redis 方案：删除以下整个 redis 服务块。
+  # 切换前请先在 Railway 控制台创建 Redis 服务并获取连接串（含密码和端口），
+  # 然后在 .env 中填写 REDIS_INFERENCE_URL / REDIS_PIPELINES_URL / REDIS_GATEWAY_URL。
   redis:
     image: redis:7-alpine
     volumes:

@@ -10,9 +10,8 @@ GET  /batch/jobs            List all known jobs
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from core.batch_engine import BatchEngine
-from core.hitl_store import HITLStore
 from core.models import BatchJobStatus, BatchSubmitRequest
-from dependencies import get_batch_engine, get_hitl_store
+from dependencies import get_batch_engine
 
 router = APIRouter()
 
@@ -26,7 +25,6 @@ router = APIRouter()
 async def submit_batch(
     request: BatchSubmitRequest,
     batch_engine: BatchEngine = Depends(get_batch_engine),
-    hitl_store: HITLStore = Depends(get_hitl_store),
 ) -> BatchJobStatus:
     """
     Accepts an array of compositions and processes them concurrently.
@@ -42,7 +40,7 @@ async def submit_batch(
     Poll `/batch/status/{job_id}` for progress or
     `/batch/result/{job_id}` once `status == "completed"`.
     """
-    return batch_engine.submit(request, hitl_store)
+    return batch_engine.submit(request)
 
 
 @router.get(

@@ -12,9 +12,10 @@ ai-writing-platform-backend/
 │   ├── api_gateway/        # Port 8000 — auth, quota, billing proxy
 │   ├── ai_inference/       # Port 8001 — LLM calls, batch cache, HITL queue
 │   ├── knowledge_retrieval/# Port 8002 — vector embeddings, semantic search
-│   └── pipelines/          # Port 8003 — document parsing, workflow orchestration
+│   ├── pipelines/          # Port 8003 — document parsing, workflow orchestration
+│   └── agents/             # Port 8004 — multi-agent AI system (5 agents)
 ├── infrastructure/
-│   ├── docker-compose.yml  # Orchestrates all 7 containers
+│   ├── docker-compose.yml  # Orchestrates all 8 containers
 │   ├── .env.example        # Template for required secrets
 │   └── init.sql            # PostgreSQL schema + pgvector setup
 └── tests/
@@ -65,6 +66,7 @@ PostgreSQL 16          Redis 7
 | `ai_inference` | 8001 | Python 3.12 / FastAPI | DeepSeek LLM inference, prompt batch caching (Redis DB 0), human-in-the-loop review queue, rubric-based grading |
 | `knowledge_retrieval` | 8002 | Python 3.12 / FastAPI | Document embedding (fastembed), HNSW vector index (pgvector), semantic similarity search |
 | `pipelines` | 8003 | Python 3.12 / FastAPI | PDF (pypdf) and DOCX (python-docx) parsing, workflow state management (Redis DB 1) |
+| `agents` | 8004 | Python 3.12 / FastAPI | Multi-agent AI system: Security Guardrail, Drafting, Evaluation Panel (3 concurrent sub-agents), Refinement, Knowledge RAG |
 | `postgres` | 5432 | PostgreSQL 16 | Relational store for users, subscriptions, embeddings, pipeline results |
 | `redis` | 6379 | Redis 7 | Shared cache / queue (DB 0: inference, DB 1: pipelines, DB 2: gateway) |
 
@@ -103,14 +105,15 @@ docker compose up --build
 
 Services will be available at:
 
-| Service | URL |
-|---------|-----|
-| API Gateway | http://localhost:8000 |
-| AI Inference | http://localhost:8001 |
-| Knowledge Retrieval | http://localhost:8002 |
-| Pipelines | http://localhost:8003 |
-| PostgreSQL | localhost:5432 |
-| Redis | localhost:6379 |
+| Service | URL | Swagger UI |
+|---------|-----|-----------|
+| API Gateway | http://localhost:8000 | http://localhost:8000/docs |
+| AI Inference | http://localhost:8001 | http://localhost:8001/docs |
+| Knowledge Retrieval | http://localhost:8002 | http://localhost:8002/docs |
+| Pipelines | http://localhost:8003 | http://localhost:8003/docs |
+| **Agents** | **http://localhost:8004** | **http://localhost:8004/docs** |
+| PostgreSQL | localhost:5458 | — |
+| Redis | localhost:6379 | — |
 
 Interactive API docs (Swagger UI) are served by each FastAPI service at `/docs`.
 
@@ -127,6 +130,106 @@ docker compose exec knowledge_retrieval \
 docker compose down          # stop containers, keep volumes
 docker compose down -v       # also remove postgres_data and redis_data
 ```
+
+---
+
+## Switching to Alibaba Cloud RDS
+
+The local `postgres` container can be replaced with an Alibaba Cloud RDS PostgreSQL instance without touching any service code — only `infrastructure/.env` and `docker-compose.yml` need to change.
+
+### 1. Prepare the RDS Instance
+
+- **Version**: PostgreSQL 14 or 16 (matches the current `pgvector/pgvector:pg16` image).
+- **pgvector plugin**: Go to **RDS Console → Instance → Plugin Management**, search for `vector`, and install it. The `knowledge_retrieval` service will fail to start if this plugin is missing.
+- **Network**: Add your server IP to the RDS whitelist, or use VPC private access.
+- **Schema**: The automatic `init.sql` mount used by the Docker container will not run against RDS. Connect to the instance and execute `infrastructure/init.sql` once manually:
+
+  ```bash
+  psql "postgresql://<user>:<password>@rm-xxxx.pg.rds.aliyuncs.com:5432/platform" \
+    -f infrastructure/init.sql
+  ```
+
+  > **Note**: `init.sql` creates an HNSW vector index (`pgvector ≥ 0.5.0` required). Verify the installed plugin version in the RDS console before running.
+
+### 2. Configure the SSL Certificate
+
+Alibaba Cloud RDS enforces SSL by default. Download the CA certificate and place it where Docker can mount it.
+
+1. In the RDS Console, go to **Instance → Data Security → SSL** and download the certificate zip.
+2. Extract the zip — you need the `.pem` file:
+   ```
+   ApsaraDB-CA-Chain.zip
+   ├── ApsaraDB-CA-Chain.pem   ← this one
+   ├── ApsaraDB-CA-Chain.jks
+   └── ApsaraDB-CA-Chain.p7b
+   ```
+3. Copy the `.pem` file into `infrastructure/certs/`:
+   ```bash
+   mkdir -p infrastructure/certs
+   cp ApsaraDB-CA-Chain.pem infrastructure/certs/
+   ```
+
+> **Security**: `infrastructure/certs/` is git-ignored. Never commit certificate files to the repository.
+
+### 3. Update `infrastructure/.env`
+
+Set `POSTGRES_DSN` to point at RDS with SSL verification enabled:
+
+```env
+POSTGRES_DSN=postgresql://<user>:<password>@rm-xxxx.pg.rds.aliyuncs.com:5432/platform?sslmode=verify-ca&sslrootcert=/certs/ApsaraDB-CA-Chain.pem
+```
+
+The `/certs/` path refers to the mount point inside each container (set up in the next step).
+
+> If you hit `certificate verify failed`, try `sslmode=require` first (encrypts without chain verification) to confirm connectivity, then switch back to `verify-ca`.
+
+### 4. Update `docker-compose.yml`
+
+Follow the inline `# 阿里云 RDS` comments already present in the file. Four types of changes:
+
+| What | How |
+|------|-----|
+| Add `volumes: - ./certs:/certs:ro` to `api_gateway`, `ai_inference`, `knowledge_retrieval`, `pipelines` | Mounts the certificate into each container |
+| Hardcoded DSN in each service's `environment:` | Replace with `${POSTGRES_DSN}` (or `DATABASE_URL=${POSTGRES_DSN}` for `ai_inference`) |
+| `depends_on: postgres` in each service | Remove the `postgres` entry |
+| Top-level `volumes: postgres_data:` and the entire `postgres:` service block | Delete both |
+
+After the changes, `docker compose up --build` will start all services pointing at RDS — the local `postgres` container is gone.
+
+---
+
+## Switching to Railway Redis
+
+The local `redis` container can be replaced with a [Railway](https://railway.app) managed Redis instance. No service code changes are needed — only `infrastructure/.env` and `docker-compose.yml`.
+
+### 1. Create a Redis Service on Railway
+
+1. Open your Railway project → **New Service → Database → Redis**.
+2. Once deployed, go to the service → **Connect** tab → copy the **Redis URL** (format: `redis://default:<password>@<host>.railway.app:<port>`).
+
+### 2. Update `infrastructure/.env`
+
+Uncomment and fill in the three `REDIS_*_URL` lines (one per logical database):
+
+```env
+REDIS_INFERENCE_URL=redis://default:<password>@<host>.railway.app:<port>/0
+REDIS_PIPELINES_URL=redis://default:<password>@<host>.railway.app:<port>/1
+REDIS_GATEWAY_URL=redis://default:<password>@<host>.railway.app:<port>/2
+```
+
+> **Note**: The host and password are the same for all three — only the trailing `/0`, `/1`, `/2` differs. Railway Redis runs in standard (non-cluster) mode, so logical databases 0–15 are supported.
+
+### 3. Update `docker-compose.yml`
+
+Follow the inline `# Railway Redis` comments already present in the file. Three types of changes:
+
+| What | How |
+|------|-----|
+| `REDIS_URL=redis://redis:6379/X` in each service's `environment:` | Replace with the matching `${REDIS_*_URL}` variable |
+| `- redis` in each service's `depends_on:` | Remove the `redis` entry |
+| Top-level `volumes: redis_data:` and the entire `redis:` service block | Delete both |
+
+After the changes, run `docker compose up --build` — all services will connect to Railway Redis and the local container will no longer start.
 
 ---
 
@@ -196,6 +299,17 @@ AI_INFERENCE_URL=http://localhost:8001
 KNOWLEDGE_RETRIEVAL_URL=http://localhost:8002
 ```
 
+**`agents`** — port 8004
+```bash
+DEEPSEEK_API_KEY=<your-key>          # omit to run in mock mode (offline)
+KNOWLEDGE_RETRIEVAL_URL=http://localhost:8002
+# Optional model overrides (all default to deepseek-chat):
+GUARDRAIL_MODEL=deepseek-chat
+DRAFTING_MODEL=deepseek-chat
+EVAL_MODEL=deepseek-chat
+REFINEMENT_MODEL=deepseek-chat
+```
+
 ### Startup Order
 
 Respect inter-service dependencies when running all services locally:
@@ -203,8 +317,9 @@ Respect inter-service dependencies when running all services locally:
 1. `postgres` + `redis` — infrastructure, no dependencies
 2. `ai_inference` (8001) and `knowledge_retrieval` (8002) — independent of each other
 3. `pipelines` (8003) — requires `ai_inference` and `knowledge_retrieval`
-4. `api_gateway` (8000) — requires all three services above
-5. Frontend dev server — requires `api_gateway`
+4. `agents` (8004) — requires `knowledge_retrieval` only (works without API key in mock mode)
+5. `api_gateway` (8000) — requires all services above
+6. Frontend dev server — requires `api_gateway`
 
 ---
 

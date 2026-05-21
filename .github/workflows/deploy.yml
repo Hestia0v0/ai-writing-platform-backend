@@ -1,0 +1,49 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy to Linux server
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    # Configure these GitHub repository secrets before enabling production deploys:
+    # - SERVER_HOST: public IP address or domain name of the Linux server
+    # - SERVER_USER: SSH username on the Linux server
+    # - SERVER_SSH_KEY: private SSH key with deployment access to the Linux server
+    # - SERVER_PORT: SSH port; optional because this workflow defaults to 22
+    # - PROJECT_PATH: absolute path to the cloned repo on the server
+    env:
+      PROJECT_PATH: ${{ secrets.PROJECT_PATH }}
+
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          envs: PROJECT_PATH
+          script_stop: true
+          command_timeout: 20m
+          script: |
+            set -eu
+
+            cd "$PROJECT_PATH"
+            git pull origin main
+
+            docker compose -f docker-compose.prod.yml up -d --build
+
+            docker image prune -f

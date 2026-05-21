@@ -30,6 +30,10 @@ build/
 .DS_Store
 Thumbs.db
 
+# SSL Certificates
+infrastructure/certs/
+ApsaraDB-CA-Chain*
+
 # Test artifacts
 .pytest_cache/
 htmlcov/
