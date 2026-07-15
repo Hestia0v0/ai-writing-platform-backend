@@ -17,11 +17,7 @@ import os
 from typing import Optional
 
 from core.models import Language, StructureLogicAnalysis, WritingFramework
-from agents.evaluation._base import (
-    DEFAULT_EVAL_MODEL,
-    build_async_client,
-    parse_json_response,
-)
+from agents.evaluation._base import DEFAULT_EVAL_MODEL, build_structured_chain
 
 logger = logging.getLogger(__name__)
 
@@ -157,8 +153,10 @@ coherence_score 评分标准（满分10，仅供参考，不计入总分）：
 
 class StructureLogicAgent:
     def __init__(self, api_key: str | None = None, model: str | None = None) -> None:
-        self._client = build_async_client(api_key)
         self._model = model or os.getenv("EVAL_MODEL", DEFAULT_EVAL_MODEL)
+        self._chain = build_structured_chain(
+            StructureLogicAnalysis, model=self._model, api_key=api_key, temperature=0.0,
+        )
 
     async def analyse(
         self,
@@ -166,7 +164,7 @@ class StructureLogicAgent:
         language: Language,
         framework: Optional[WritingFramework] = None,
     ) -> StructureLogicAnalysis:
-        if self._client is None:
+        if self._chain is None:
             return self._mock()
         return await self._llm_analyse(text, language, framework)
 
@@ -176,6 +174,8 @@ class StructureLogicAgent:
         language: Language,
         framework: Optional[WritingFramework] = None,
     ) -> StructureLogicAnalysis:
+        from langchain_core.messages import HumanMessage, SystemMessage  # noqa: PLC0415
+
         if language == Language.CHINESE and framework == WritingFramework.QI_CHENG_ZHUAN_HE:
             system = _SYSTEM_PROMPT_ZH_QCZH
         elif language == Language.CHINESE:
@@ -183,27 +183,10 @@ class StructureLogicAgent:
         else:
             system = _SYSTEM_PROMPT_EN
         try:
-            resp = await self._client.chat.completions.create(
-                model=self._model,
-                max_tokens=512,
-                temperature=0.0,
-                response_format={"type": "json_object"},
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": f"Essay to analyse:\n\n{text[:6000]}"},
-                ],
-            )
-            data = parse_json_response(resp.choices[0].message.content or "{}")
-            return StructureLogicAnalysis(
-                has_clear_intro=bool(data.get("has_clear_intro", True)),
-                has_clear_conclusion=bool(data.get("has_clear_conclusion", True)),
-                intro_conclusion_echo=bool(data.get("intro_conclusion_echo", False)),
-                on_topic=bool(data.get("on_topic", True)),
-                paragraph_structure_ok=bool(data.get("paragraph_structure_ok", True)),
-                issues=data.get("issues", []),
-                raw_score=float(data.get("raw_score", 15.0)),
-                coherence_score=float(data.get("coherence_score", 6.0)),
-            )
+            return await self._chain.ainvoke([
+                SystemMessage(content=system),
+                HumanMessage(content=f"Essay to analyse:\n\n{text[:6000]}"),
+            ])
         except Exception as exc:  # noqa: BLE001
             logger.error("StructureLogicAgent LLM call failed: %s", exc)
             return self._mock()
