@@ -220,6 +220,14 @@ class EvaluationResult(BaseModel):
         default=False,
         description="True when this result was served from the evaluation cache (US-17)",
     )
+    flagged_for_review: bool = Field(
+        default=False,
+        description="True when the Consistency Arbiter ran because sub-scores disagreed sharply",
+    )
+    flag_reason: Optional[str] = Field(
+        default=None,
+        description="Explanation set by the Consistency Arbiter when flagged_for_review is True",
+    )
 
 
 # ── 4. Refinement Agent ────────────────────────────────────────────────────────

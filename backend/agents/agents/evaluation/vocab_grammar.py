@@ -14,11 +14,7 @@ import logging
 import os
 
 from core.models import Language, VocabGrammarAnalysis
-from agents.evaluation._base import (
-    DEFAULT_EVAL_MODEL,
-    build_async_client,
-    parse_json_response,
-)
+from agents.evaluation._base import DEFAULT_EVAL_MODEL, build_structured_chain
 
 logger = logging.getLogger(__name__)
 
@@ -81,35 +77,25 @@ raw_score 评分标准（满分25）：
 
 class VocabGrammarAgent:
     def __init__(self, api_key: str | None = None, model: str | None = None) -> None:
-        self._client = build_async_client(api_key)
         self._model = model or os.getenv("EVAL_MODEL", DEFAULT_EVAL_MODEL)
+        self._chain = build_structured_chain(
+            VocabGrammarAnalysis, model=self._model, api_key=api_key, temperature=0.0,
+        )
 
     async def analyse(self, text: str, language: Language) -> VocabGrammarAnalysis:
-        if self._client is None:
+        if self._chain is None:
             return self._mock(text)
         return await self._llm_analyse(text, language)
 
     async def _llm_analyse(self, text: str, language: Language) -> VocabGrammarAnalysis:
+        from langchain_core.messages import HumanMessage, SystemMessage  # noqa: PLC0415
+
         system = _SYSTEM_PROMPT_ZH if language == Language.CHINESE else _SYSTEM_PROMPT_EN
         try:
-            resp = await self._client.chat.completions.create(
-                model=self._model,
-                max_tokens=1024,
-                temperature=0.0,
-                response_format={"type": "json_object"},
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": f"Essay to analyse:\n\n{text[:6000]}"},
-                ],
-            )
-            data = parse_json_response(resp.choices[0].message.content or "{}")
-            return VocabGrammarAnalysis(
-                error_count=int(data.get("error_count", 0)),
-                errors=data.get("errors", []),
-                vocabulary_richness=data.get("vocabulary_richness", "medium"),
-                vocabulary_notes=data.get("vocabulary_notes", ""),
-                raw_score=float(data.get("raw_score", 15.0)),
-            )
+            return await self._chain.ainvoke([
+                SystemMessage(content=system),
+                HumanMessage(content=f"Essay to analyse:\n\n{text[:6000]}"),
+            ])
         except Exception as exc:  # noqa: BLE001
             logger.error("VocabGrammarAgent LLM call failed: %s", exc)
             return self._mock(text)

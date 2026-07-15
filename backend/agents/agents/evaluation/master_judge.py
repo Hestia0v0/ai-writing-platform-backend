@@ -17,6 +17,9 @@ from __future__ import annotations
 import logging
 import os
 import time
+from typing import Optional
+
+from pydantic import BaseModel, Field
 
 from core.models import (
     EvaluationRequest,
@@ -27,13 +30,21 @@ from core.models import (
     StyleAnalysis,
     VocabGrammarAnalysis,
 )
-from agents.evaluation._base import (
-    DEFAULT_EVAL_MODEL,
-    build_async_client,
-    parse_json_response,
-)
+from agents.evaluation._base import DEFAULT_EVAL_MODEL, build_structured_chain
 
 logger = logging.getLogger(__name__)
+
+
+class _MasterJudgeOutput(BaseModel):
+    """Structured-output schema for the Master Judge's LLM call."""
+    content_score: float = Field(default=20.0, ge=0.0, le=25.0)
+    creativity_score: float = Field(default=5.0, ge=0.0, le=10.0)
+    chinese_dimensions: Optional[dict[str, float]] = None
+    strengths: list[str] = Field(default_factory=list)
+    weaknesses: list[str] = Field(default_factory=list)
+    evidence: list[str] = Field(default_factory=list)
+    suggestions: list[str] = Field(default_factory=list)
+
 
 _SYSTEM_PROMPT_EN = """\
 You are the Master Judge of an AI writing evaluation panel for students aged 10–18.
@@ -172,8 +183,10 @@ def _find_evidence_positions(text: str, evidence: list[str]) -> list[EvidencePos
 
 class MasterJudgeAgent:
     def __init__(self, api_key: str | None = None, model: str | None = None) -> None:
-        self._client = build_async_client(api_key)
         self._model = model or os.getenv("EVAL_MODEL", DEFAULT_EVAL_MODEL)
+        self._chain = build_structured_chain(
+            _MasterJudgeOutput, model=self._model, api_key=api_key, temperature=0.3,
+        )
 
     async def judge(
         self,
@@ -183,7 +196,7 @@ class MasterJudgeAgent:
         style: StyleAnalysis,
         start_time: float,
     ) -> EvaluationResult:
-        if self._client is None:
+        if self._chain is None:
             return self._mock_verdict(request, vocab, structure, style, start_time)
         return await self._llm_judge(request, vocab, structure, style, start_time)
 
@@ -195,48 +208,35 @@ class MasterJudgeAgent:
         style: StyleAnalysis,
         start_time: float,
     ) -> EvaluationResult:
+        from langchain_core.messages import HumanMessage, SystemMessage  # noqa: PLC0415
+
         system = _SYSTEM_PROMPT_ZH if request.language == Language.CHINESE else _SYSTEM_PROMPT_EN
         sub_report = self._build_sub_report(vocab, structure, style)
-        model = request.model or self._model
         try:
-            resp = await self._client.chat.completions.create(
-                model=model,
-                max_tokens=1400,
-                temperature=0.3,
-                response_format={"type": "json_object"},
-                messages=[
-                    {"role": "system", "content": system},
-                    {
-                        "role": "user",
-                        "content": (
-                            f"=== SUB-AGENT REPORTS ===\n{sub_report}\n\n"
-                            f"=== ESSAY TEXT ===\n{request.text[:4000]}"
-                        ),
-                    },
-                ],
-            )
-            data = parse_json_response(resp.choices[0].message.content or "{}")
-            content_score = float(data.get("content_score", 20.0))
+            output: _MasterJudgeOutput = await self._chain.ainvoke([
+                SystemMessage(content=system),
+                HumanMessage(
+                    content=(
+                        f"=== SUB-AGENT REPORTS ===\n{sub_report}\n\n"
+                        f"=== ESSAY TEXT ===\n{request.text[:4000]}"
+                    ),
+                ),
+            ])
         except Exception as exc:  # noqa: BLE001
             logger.error("MasterJudgeAgent LLM call failed: %s", exc)
-            content_score = 20.0
-            data = {}
+            output = _MasterJudgeOutput()
 
+        content_score = output.content_score
         total = round(vocab.raw_score + structure.raw_score + style.raw_score + content_score, 1)
         total = max(0.0, min(100.0, total))
         latency = int((time.perf_counter() - start_time) * 1000)
 
-        evidence_list: list[str] = data.get("evidence", [])
-        evidence_positions = _find_evidence_positions(request.text, evidence_list)
+        evidence_positions = _find_evidence_positions(request.text, output.evidence)
 
-        # Chinese-specific dimensions — only present for ZH essays
-        chinese_dimensions: dict[str, float] | None = None
-        if request.language == Language.CHINESE and "chinese_dimensions" in data:
-            raw_cn = data["chinese_dimensions"]
-            if isinstance(raw_cn, dict):
-                chinese_dimensions = {
-                    k: float(v) for k, v in raw_cn.items() if isinstance(v, (int, float))
-                }
+        # Chinese-specific dimensions — only meaningful for ZH essays
+        chinese_dimensions = (
+            output.chinese_dimensions if request.language == Language.CHINESE else None
+        )
 
         return EvaluationResult(
             document_id=request.document_id,
@@ -246,14 +246,14 @@ class MasterJudgeAgent:
             structure_logic=structure,
             style=style,
             content_score=round(content_score, 1),
-            creativity_score=float(data.get("creativity_score", 5.0)),
+            creativity_score=output.creativity_score,
             chinese_dimensions=chinese_dimensions,
-            strengths=data.get("strengths", ["Good effort overall."]),
-            weaknesses=data.get("weaknesses", ["See sub-agent reports for details."]),
-            evidence=evidence_list,
+            strengths=output.strengths or ["Good effort overall."],
+            weaknesses=output.weaknesses or ["See sub-agent reports for details."],
+            evidence=output.evidence,
             evidence_positions=evidence_positions,
-            suggestions=data.get("suggestions", ["Review grammar and add more sensory detail."]),
-            model_used=model,
+            suggestions=output.suggestions or ["Review grammar and add more sensory detail."],
+            model_used=self._model,
             latency_ms=latency,
         )
 

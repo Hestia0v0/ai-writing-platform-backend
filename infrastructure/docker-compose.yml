@@ -69,9 +69,15 @@ services:
       - DRAFTING_MODEL=${DRAFTING_MODEL:-deepseek-chat}
       - EVAL_MODEL=${EVAL_MODEL:-deepseek-chat}
       - REFINEMENT_MODEL=${REFINEMENT_MODEL:-deepseek-chat}
+      - EVAL_FALLBACK_MODEL=${EVAL_FALLBACK_MODEL:-deepseek-reasoner}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - EVAL_FALLBACK_ANTHROPIC_MODEL=${EVAL_FALLBACK_ANTHROPIC_MODEL:-claude-haiku-4-5}
+      - ARBITRATION_STDEV_THRESHOLD=${ARBITRATION_STDEV_THRESHOLD:-6.0}
       - KNOWLEDGE_RETRIEVAL_URL=http://knowledge_retrieval:8002
+      - REDIS_URL=redis://redis:6379/3
     depends_on:
       - knowledge_retrieval
+      - redis
     networks:
       - platform_net
     restart: unless-stopped
