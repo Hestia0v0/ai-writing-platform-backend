@@ -37,6 +37,7 @@ services:
       - AGENTS_URL=http://agents:8004
       - POSTGRES_DSN=${POSTGRES_DSN}
       - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
+      - SUPER_ADMIN_EMAIL=${SUPER_ADMIN_EMAIL:-}
       - CORS_ORIGINS=http://localhost:3000
       - REDIS_URL=redis://redis:6379/2
       # Railway Redis：将上一行替换为：

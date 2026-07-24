@@ -38,10 +38,31 @@ CREATE TABLE IF NOT EXISTS users (
     created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- ── User Roles (API Gateway RBAC) ────────────────────────────────────────────
+-- Multi-role: a user can hold zero or more of these simultaneously. Absence of
+-- any row means "plain user" — the default, implicit role.
+CREATE TABLE IF NOT EXISTS user_roles (
+    id         SERIAL      PRIMARY KEY,
+    user_id    TEXT        NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    role       TEXT        NOT NULL CHECK (role IN ('reviewer', 'admin', 'super_admin')),
+    granted_by TEXT,
+    granted_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (user_id, role)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_roles_user_id ON user_roles (user_id);
+
 -- ── AI Inference: HITL review queue ─────────────────────────────────────────
 -- SQLAlchemy creates this table via init_db(); defined here as reference only.
 -- (Uncomment and remove the SQLAlchemy auto-create if you prefer pure SQL migrations.)
 -- CREATE TABLE IF NOT EXISTS review_queue ( ... );
+
+-- ── AI Inference: Rubric configuration ───────────────────────────────────────
+-- Also SQLAlchemy-managed (db/models.py RubricDimensionORM) — ai_inference's
+-- init_db() creates this table AND seeds the default 4 dimensions/25 points
+-- each on first startup against any fresh database, cloud or local. Listed
+-- here as reference only, same as review_queue above.
+-- CREATE TABLE IF NOT EXISTS rubric_dimensions ( ... );
 
 -- ── Billing: Subscriptions ───────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS subscriptions (

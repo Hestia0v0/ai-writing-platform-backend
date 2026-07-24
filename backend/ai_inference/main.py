@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from db.database import init_db
-from routers import batch_cache, health, hitl, inference
+from routers import batch_cache, health, hitl, inference, rubric
 
 logging.basicConfig(
     level=logging.INFO,
@@ -45,6 +45,7 @@ app.include_router(health.router, prefix="/health", tags=["health"])
 app.include_router(inference.router, prefix="/inference", tags=["inference"])
 app.include_router(batch_cache.router, prefix="/batch", tags=["batch"])
 app.include_router(hitl.router, prefix="/hitl", tags=["human-in-the-loop"])
+app.include_router(rubric.router, prefix="/rubric", tags=["rubric"])
 
 
 @app.get("/")

@@ -11,8 +11,9 @@ POST /hitl/decide                 Submit a reviewer's decision
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 
+from auth import require_role
 from core.hitl_store import HITLStore
 from core.models import (
     FlagReason,
@@ -22,7 +23,12 @@ from core.models import (
 )
 from dependencies import get_hitl_store
 
-router = APIRouter()
+# Every endpoint in this router requires the reviewer/admin/super_admin role
+# (see auth.require_role) — this is a human-review queue, not general-purpose
+# grading data.
+router = APIRouter(
+    dependencies=[Depends(require_role("reviewer", "admin", "super_admin"))]
+)
 
 
 @router.get(
@@ -88,18 +94,22 @@ async def get_review_item(
 @router.post(
     "/{review_id}/assign",
     response_model=ReviewQueueItem,
-    summary="Claim a pending review item for a specific reviewer",
+    summary="Claim a pending review item for the calling reviewer",
 )
 async def assign_reviewer(
     review_id: str,
-    reviewer_id: str = Query(..., description="ID of the reviewer claiming this item"),
+    x_user_id: str = Header(..., description="Injected by api_gateway from the caller's JWT"),
     hitl_store: HITLStore = Depends(get_hitl_store),
 ) -> ReviewQueueItem:
     """
     Transitions the item from `pending` → `in_review` and records the reviewer.
     Idempotent: returns the current state if already assigned.
+
+    The reviewer identity is the authenticated caller (X-User-Id) — it is
+    never accepted as a client-supplied field, otherwise anyone could claim
+    or decide a review under someone else's name.
     """
-    item = hitl_store.assign_reviewer(review_id, reviewer_id)
+    item = hitl_store.assign_reviewer(review_id, x_user_id)
     if item is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -134,6 +144,7 @@ async def escalate(
 )
 async def submit_decision(
     decision: ReviewDecision,
+    x_user_id: str = Header(..., description="Injected by api_gateway from the caller's JWT"),
     hitl_store: HITLStore = Depends(get_hitl_store),
 ) -> ReviewQueueItem:
     """
@@ -141,7 +152,12 @@ async def submit_decision(
     Set `approved=false` and provide `reviewer_score` to override the AI grade.
     In both cases, the item transitions to `approved` or `overridden` and is
     removed from the active review queue.
+
+    `decision.reviewer_id` is ignored and overwritten with the authenticated
+    caller (X-User-Id) — see assign_reviewer() for why it can't be trusted
+    as client input.
     """
+    decision.reviewer_id = x_user_id
     item = hitl_store.submit_decision(decision)
     if item is None:
         raise HTTPException(

@@ -62,7 +62,9 @@ class ConsistencyArbiterAgent:
             f"Vocabulary & Grammar: {result.vocab_grammar.raw_score}/25\n"
             f"Structure & Logic: {result.structure_logic.raw_score}/25\n"
             f"Style / Show-Don't-Tell: {result.style.raw_score}/25\n"
-            f"Content & Ideas: {result.content_score}/25\n"
+            # content_score's max is admin-configurable (rubric_client.py) so it
+            # isn't always /25 — omit the misleading fixed denominator here.
+            f"Content & Ideas: {result.content_score}\n"
             f"Panel total: {result.total_score}/100"
         )
         try:

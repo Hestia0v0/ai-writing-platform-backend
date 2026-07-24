@@ -51,8 +51,13 @@ def test_generate_stub(client):
     assert "score" in data
 
 
-def test_hitl_queue(client):
+def test_hitl_queue_requires_reviewer_role(client):
     response = client.get("/hitl/queue")
+    assert response.status_code == 403
+
+
+def test_hitl_queue(client):
+    response = client.get("/hitl/queue", headers={"X-User-Role": "reviewer"})
     assert response.status_code == 200
 
 

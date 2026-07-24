@@ -31,13 +31,22 @@ from core.models import (
     VocabGrammarAnalysis,
 )
 from agents.evaluation._base import DEFAULT_EVAL_MODEL, build_structured_chain
+from agents.evaluation.rubric_client import get_content_max_score
 
 logger = logging.getLogger(__name__)
 
 
 class _MasterJudgeOutput(BaseModel):
-    """Structured-output schema for the Master Judge's LLM call."""
-    content_score: float = Field(default=20.0, ge=0.0, le=25.0)
+    """
+    Structured-output schema for the Master Judge's LLM call.
+
+    content_score's upper bound is intentionally generous (100, not the
+    "25" the prompt asks for) because the prompt's actual ceiling is the
+    admin-configured content weight (see get_content_max_score) — a fixed
+    Pydantic Field bound can't vary per-request, so the real bound is
+    enforced by clamping in _llm_judge()/_mock_verdict() instead.
+    """
+    content_score: float = Field(default=20.0, ge=0.0, le=100.0)
     creativity_score: float = Field(default=5.0, ge=0.0, le=10.0)
     chinese_dimensions: Optional[dict[str, float]] = None
     strengths: list[str] = Field(default_factory=list)
@@ -46,7 +55,18 @@ class _MasterJudgeOutput(BaseModel):
     suggestions: list[str] = Field(default_factory=list)
 
 
-_SYSTEM_PROMPT_EN = """\
+def _system_prompt_en(content_max: float) -> str:
+    # The 22-25/17-21/... bands below are written for the historical 25-point
+    # scale; when an admin reconfigures the content weight, we tell the model
+    # to scale them proportionally rather than re-deriving every band number
+    # per-request (the other three sub-agents' 25-point scales are unchanged).
+    scale_note = (
+        "" if content_max == 25
+        else f"\nNote: the point range above is {content_max:g}, not the 25 used in the "
+             f"bands below — scale each band proportionally (e.g. a band written as "
+             f"\"22–25\" becomes the top {25 - 22}/25 of {content_max:g}).\n"
+    )
+    return f"""\
 You are the Master Judge of an AI writing evaluation panel for students aged 10–18.
 
 You have already received detailed reports from three specialist sub-agents:
@@ -55,7 +75,7 @@ You have already received detailed reports from three specialist sub-agents:
   3. Style / Show-Don't-Tell Agent (includes emotion pattern analysis)
 
 Your job is to:
-1. Assess the **Content & Ideas** dimension (0–25 points):
+1. Assess the **Content & Ideas** dimension (0–{content_max:g} points):
    - Idea development: originality, depth, relevance to the topic
    - Quality of arguments or narrative arc
    - Idea coherence with the essay's structure
@@ -67,15 +87,15 @@ Your job is to:
 6. Write 3–5 concrete **suggestions** the student can act on immediately.
 
 Respond with ONLY a valid JSON object (no markdown, no explanation):
-{
-  "content_score": <float 0–25>,
+{{
+  "content_score": <float 0–{content_max:g}>,
   "creativity_score": <float 0–10>,
   "strengths": ["<strength with evidence quote>", ...],
   "weaknesses": ["<weakness with evidence quote>", ...],
   "evidence": ["<verbatim sentence from essay>", ...],
   "suggestions": ["<actionable suggestion>", ...]
-}
-
+}}
+{scale_note}
 Content & Ideas scoring guide (out of 25):
   22–25: Original, insightful ideas; well-developed argument or narrative; fully on-topic.
   17–21: Clear ideas with adequate development; mostly relevant.
@@ -91,7 +111,14 @@ Creativity sub-score (out of 10):
   0–2:  No creative effort detectable.
 """
 
-_SYSTEM_PROMPT_ZH = """\
+
+def _system_prompt_zh(content_max: float) -> str:
+    scale_note = (
+        "" if content_max == 25
+        else f"\n注意：上面给出的满分是{content_max:g}分，不是下方评分标准使用的25分——请将各档位按比例换算"
+             f"（例如\"22–25\"档位换算为{content_max:g}分制的最高 3/25 区间）。\n"
+    )
+    return f"""\
 你是一个面向10–18岁学生的AI作文评分委员会的主审裁判。
 
 你已经收到来自三位专项评审助理的详细报告：
@@ -100,7 +127,7 @@ _SYSTEM_PROMPT_ZH = """\
   3. 风格与描写技巧评审（含情感表达模式分析）
 
 你的职责是：
-1. 评估**内容与思想**维度（0–25分）：
+1. 评估**内容与思想**维度（0–{content_max:g}分）：
    - 思想发展：创意性、思想深度、是否切题
    - 论点或叙述质量
    - 思想与作文结构的契合度
@@ -116,20 +143,20 @@ _SYSTEM_PROMPT_ZH = """\
 7. 写出3–5条学生可以立刻付诸行动的具体**改进建议**。
 
 请仅以有效的 JSON 对象回复（不加 Markdown 格式，不加任何解释）：
-{
-  "content_score": <浮点数 0–25>,
+{{
+  "content_score": <浮点数 0–{content_max:g}>,
   "creativity_score": <浮点数 0–10>,
-  "chinese_dimensions": {
+  "chinese_dimensions": {{
     "字词运用": <浮点数 0–10>,
     "情感深度": <浮点数 0–10>,
     "描写质量": <浮点数 0–10>
-  },
+  }},
   "strengths": ["<优点及原文引用>", ...],
   "weaknesses": ["<不足及原文引用>", ...],
   "evidence": ["<作文原句，必须逐字照抄>", ...],
   "suggestions": ["<可操作的建议>", ...]
-}
-
+}}
+{scale_note}
 内容与思想评分标准（满分25）：
   22–25：立意新颖，思想深刻，论点或叙述充分展开，完全切题。
   17–21：思想清晰，展开较充分，基本切题。
@@ -197,7 +224,7 @@ class MasterJudgeAgent:
         start_time: float,
     ) -> EvaluationResult:
         if self._chain is None:
-            return self._mock_verdict(request, vocab, structure, style, start_time)
+            return await self._mock_verdict(request, vocab, structure, style, start_time)
         return await self._llm_judge(request, vocab, structure, style, start_time)
 
     async def _llm_judge(
@@ -210,7 +237,11 @@ class MasterJudgeAgent:
     ) -> EvaluationResult:
         from langchain_core.messages import HumanMessage, SystemMessage  # noqa: PLC0415
 
-        system = _SYSTEM_PROMPT_ZH if request.language == Language.CHINESE else _SYSTEM_PROMPT_EN
+        content_max = await get_content_max_score()
+        system = (
+            _system_prompt_zh(content_max) if request.language == Language.CHINESE
+            else _system_prompt_en(content_max)
+        )
         sub_report = self._build_sub_report(vocab, structure, style)
         try:
             output: _MasterJudgeOutput = await self._chain.ainvoke([
@@ -224,10 +255,19 @@ class MasterJudgeAgent:
             ])
         except Exception as exc:  # noqa: BLE001
             logger.error("MasterJudgeAgent LLM call failed: %s", exc)
-            output = _MasterJudgeOutput()
+            output = _MasterJudgeOutput(content_score=min(20.0, content_max))
 
-        content_score = output.content_score
-        total = round(vocab.raw_score + structure.raw_score + style.raw_score + content_score, 1)
+        # Clamp defensively — the LLM is instructed with content_max but
+        # Pydantic's Field bound is intentionally generous (see _MasterJudgeOutput).
+        content_score = max(0.0, min(output.content_score, content_max))
+
+        # vocab/structure/style stay on their fixed 25-point scales (see module
+        # docstring for why full multi-agent reweighting is out of scope);
+        # normalize the total proportionally so a non-default content_max
+        # still always yields a 0-100 total_score.
+        raw_total = vocab.raw_score + structure.raw_score + style.raw_score + content_score
+        max_possible = 75.0 + content_max
+        total = round(raw_total / max_possible * 100.0, 1) if max_possible else 0.0
         total = max(0.0, min(100.0, total))
         latency = int((time.perf_counter() - start_time) * 1000)
 
@@ -276,7 +316,7 @@ class MasterJudgeAgent:
             f"quality={style.descriptive_quality}, score={style.raw_score}/25"
         )
 
-    def _mock_verdict(
+    async def _mock_verdict(
         self,
         request: EvaluationRequest,
         vocab: VocabGrammarAnalysis,
@@ -284,8 +324,11 @@ class MasterJudgeAgent:
         style: StyleAnalysis,
         start_time: float,
     ) -> EvaluationResult:
-        content_score = 20.0
-        total = round(vocab.raw_score + structure.raw_score + style.raw_score + content_score, 1)
+        content_max = await get_content_max_score()
+        content_score = min(20.0, content_max)
+        raw_total = vocab.raw_score + structure.raw_score + style.raw_score + content_score
+        max_possible = 75.0 + content_max
+        total = round(raw_total / max_possible * 100.0, 1) if max_possible else 0.0
         total = max(0.0, min(100.0, total))
         chinese_dimensions = (
             {"字词运用": 7.0, "情感深度": 6.0, "描写质量": 7.0}

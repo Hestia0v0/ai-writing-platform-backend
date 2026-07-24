@@ -1,4 +1,6 @@
+import logging
 import os
+from contextlib import asynccontextmanager
 from datetime import date
 from typing import Optional
 
@@ -9,10 +11,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from auth import decode_token
-from db import get_conn
-from routers import auth, billing, health, proxy
+from db import get_conn, seed_super_admin_by_email
+from routers import admin, auth, billing, health, proxy
+
+logger = logging.getLogger(__name__)
 
 _CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
+_SUPER_ADMIN_EMAIL = os.getenv("SUPER_ADMIN_EMAIL", "")
 
 # Paths that don't require a JWT token
 _PUBLIC_PATHS = {"/", "/docs", "/openapi.json", "/redoc", "/api/v1/billing/webhook"}
@@ -25,7 +30,22 @@ _redis_client = redis_lib.from_url(
     decode_responses=True,
 )
 
-app = FastAPI(title="API Gateway", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Covers the "SUPER_ADMIN_EMAIL set AFTER that email already registered"
+    # ordering — the register/login-time check in routers/auth.py covers the
+    # reverse ordering. No-op (and safe to retry) if the email hasn't
+    # registered yet, or the DB isn't reachable at cold-start.
+    if _SUPER_ADMIN_EMAIL:
+        try:
+            seed_super_admin_by_email(_SUPER_ADMIN_EMAIL)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Super-admin seed check failed at startup: %s", exc)
+    yield
+
+
+app = FastAPI(title="API Gateway", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -90,6 +110,10 @@ async def jwt_middleware(request: Request, call_next):
         payload = decode_token(token)
         request.state.user_id = payload["sub"]
         request.state.email = payload["email"]
+        # payload.get(...) rather than payload["roles"]: tokens issued before
+        # this feature shipped don't have the claim — treat them as plain
+        # users rather than rejecting them outright.
+        request.state.roles = payload.get("roles", [])
     except jwt.ExpiredSignatureError:
         return JSONResponse(status_code=401, content={"detail": "Token expired."})
     except jwt.InvalidTokenError:
@@ -107,6 +131,7 @@ async def jwt_middleware(request: Request, call_next):
 app.include_router(health.router, prefix="/health", tags=["health"])
 app.include_router(auth.router, prefix="/auth", tags=["auth"])
 app.include_router(billing.router, prefix="/api/v1/billing", tags=["billing"])
+app.include_router(admin.router, prefix="/api/v1/admin", tags=["admin"])
 app.include_router(proxy.router, prefix="/api/v1", tags=["proxy"])
 
 

@@ -323,6 +323,35 @@ KNOWLEDGE_RETRIEVAL_URL=http://localhost:8002
 | `STRIPE_WEBHOOK_SECRET` | Stripe Webhook 签名密钥（`whsec_…`） |
 | `STRIPE_PRICE_BASIC` | 基础套餐对应的 Stripe Price ID |
 | `STRIPE_PRICE_PRO` | 专业套餐对应的 Stripe Price ID |
+| `SUPER_ADMIN_EMAIL` | 自动升级为 `super_admin` 的邮箱地址——见下方 [角色与管理员权限](#角色与管理员权限) |
+
+---
+
+## 角色与管理员权限
+
+除默认的已认证用户外，还有三种进阶角色存放在 `user_roles` 表中，并写入 JWT 的 `roles` 字段（一个用户可以同时拥有多个角色）：
+
+| 角色 | 权限范围 |
+|------|----------|
+| `reviewer` | 访问 HITL 复核队列（`/hitl/*`）——认领、批准或覆盖 AI 评分 |
+| `admin` | 用户列表/停用、订阅可见性、知识库内容管理（`/retrieval/index`）、批处理任务可见性、评分标准（rubric）权重管理 |
+| `super_admin` | 拥有 `admin` 的全部权限，另外可以授予/撤销角色、手动授予订阅 |
+
+### 引导产生第一个 super_admin
+
+系统没有任何界面或接口可以自助赋予角色——全新部署默认没有任何管理员。在 `infrastructure/.env` 中设置 `SUPER_ADMIN_EMAIL` 为应成为首个 `super_admin` 的邮箱：
+
+```env
+SUPER_ADMIN_EMAIL=you@example.com
+```
+
+该检查是幂等的（可以一直保留在配置里不用管），在两处触发，因此不论先后顺序如何都不需要手动跑 SQL：
+- 该邮箱每次调用 `/auth/register` 或 `/auth/login` 时都会检查一次。
+- `api_gateway` 启动时也会检查一次——覆盖"账号在设置 `SUPER_ADMIN_EMAIL` 之前就已经注册"的情况。
+
+之后，这个 super_admin 就可以通过 `POST /api/v1/admin/users/{user_id}/roles` 给其他账号授予 `admin` / `reviewer` / `super_admin`。
+
+> **注意**：角色是在签发 JWT 时写入 token 的——角色变更要到该用户**下一次登录**才会生效，不是实时生效（token 有效期最长 24 小时）。
 
 ---
 
