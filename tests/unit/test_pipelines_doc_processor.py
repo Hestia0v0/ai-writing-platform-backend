@@ -6,7 +6,7 @@ Pipelines 纯逻辑单测（DocumentProcessor 及相关类型）
   • 不 import main、不使用 TestClient；
   • 从而在 pytest collect/import 阶段不会加载 FastAPI lifespan，也不会执行 asyncpg get_pool。
 
-因此属于「纯逻辑 / 领域单元测试」：在进程内用 AIInferenceClient(use_mock=True) 跑完整流水线，
+因此属于「纯逻辑 / 领域单元测试」：在进程内用 GradingClient(use_mock=True) 跑完整流水线，
 无真实外呼、无数据库。与带 HTTP + Postgres 的 tests/unit/test_pipelines.py 分离，
 以便 minimal CI 在无 Docker Postgres 的环境下稳定执行。
 """
@@ -19,7 +19,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../backend/pipelines"))
 
 from doc_processor import (
-    AIInferenceClient,
+    GradingClient,
     DocumentProcessor,
     PipelineStage,
     TextCleaner,
@@ -32,7 +32,7 @@ from doc_processor import (
 
 def make_processor(use_mock: bool = True) -> DocumentProcessor:
     return DocumentProcessor(
-        inference_client=AIInferenceClient(use_mock=use_mock)
+        inference_client=GradingClient(use_mock=use_mock)
     )
 
 

@@ -132,11 +132,13 @@ services:
       # Railway Redis：将上一行替换为：
       # - REDIS_URL=${REDIS_PIPELINES_URL}
       - AI_INFERENCE_URL=http://ai_inference:8001
+      - AGENTS_URL=http://agents:8004
       - KNOWLEDGE_RETRIEVAL_URL=http://knowledge_retrieval:8002
       - POSTGRES_DSN=${POSTGRES_DSN}
     depends_on:
       - redis     # Railway Redis：删除此行
       - ai_inference
+      - agents
       - knowledge_retrieval
     networks:
       - platform_net

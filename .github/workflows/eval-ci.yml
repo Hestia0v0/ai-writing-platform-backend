@@ -1,0 +1,62 @@
+# =============================================================================
+# DeepEval 评估门禁（手动触发）
+#
+# 跑 tests/evals/ 下的 LLM-as-judge 评估：agents 主路径评分质量、ai_inference
+# 兜底路径评分质量、两条路径的一致性（parity）回归检查。
+#
+# 不接入 push/PR 自动门禁的原因：
+#   1. 依赖真实 DeepSeek + Claude API 调用，有成本且有非确定性；
+#   2. 需要 docker compose 起完整服务栈（agents + ai_inference + 依赖），耗时较长；
+#   3. 黄金集目前是手工整理的小样本（tests/evals/goldens/essays.json），阈值仍在
+#      校准阶段，不适合作为阻塞性 PR 门禁。
+#
+# 待黄金集扩充、阈值稳定后，可考虑收窄为「仅当 grader.py / evaluation/*.py /
+# prompt 变更时触发」的 PR 门禁，或改为 nightly schedule。
+# =============================================================================
+
+name: DeepEval 评估
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deepeval-suite:
+    name: 评分质量评估（agents 主路径 + ai_inference 兜底 + 一致性）
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 启动服务栈
+        working-directory: infrastructure
+        run: |
+          cp .env.example .env
+          docker compose up -d --wait
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      - name: 配置 Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: tests/evals/requirements.txt
+
+      - name: 安装评估依赖
+        run: pip install -r tests/evals/requirements.txt
+
+      - name: 运行 DeepEval 评估套件
+        run: pytest tests/evals -v -m eval --tb=short
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          AI_INFERENCE_URL: http://localhost:8001
+          AGENTS_URL: http://localhost:8004
+
+      - name: 停止服务栈
+        if: always()
+        working-directory: infrastructure
+        run: docker compose down -v

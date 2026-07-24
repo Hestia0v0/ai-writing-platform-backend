@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from doc_processor import (
-    AIInferenceClient,
+    GradingClient,
     DocumentProcessor,
     FeedbackItem,
     PipelineResult,
@@ -48,10 +48,12 @@ class EditorRecordRequest(BaseModel):
 
 
 _INFERENCE_URL = os.getenv("AI_INFERENCE_URL", "http://ai_inference:8001")
+_AGENTS_URL = os.getenv("AGENTS_URL", "http://agents:8004")
 
 _processor = DocumentProcessor(
-    inference_client=AIInferenceClient(
+    inference_client=GradingClient(
         base_url=_INFERENCE_URL,
+        agents_base_url=_AGENTS_URL,
         use_mock=_USE_MOCK,
     )
 )
@@ -169,6 +171,7 @@ async def record_editor_result(
         feedback=feedback_items,
         summary=req.overall_feedback,
         model_used=req.model_used,
+        source_tier="manual",
     )
     result = PipelineResult(
         document_id=req.document_id,

@@ -1,0 +1,38 @@
+[
+  {
+    "id": "en-strong-01",
+    "language": "en",
+    "tier": "strong",
+    "text": "Renewable energy sources such as solar and wind power should replace fossil fuels as the primary source of electricity within the next two decades. First, renewable technology has become dramatically cheaper: the cost of solar panels has fallen by more than eighty percent since 2010, according to the International Energy Agency, making solar competitive with coal in most markets. Second, the environmental case is undeniable — burning fossil fuels released over thirty-six billion tonnes of carbon dioxide in 2021 alone, a major driver of the extreme weather events now affecting communities worldwide. Critics argue that renewable energy cannot yet provide reliable baseload power because the sun does not always shine and the wind does not always blow. This concern is valid but increasingly outdated: grid-scale battery storage and smart demand management are closing the reliability gap every year. Countries such as Denmark already generate over half their electricity from wind, proving that a stable, mostly renewable grid is achievable with the right infrastructure investment. For these reasons, governments should accelerate the transition away from fossil fuels, not merely as an environmental aspiration but as an economically sound and increasingly urgent policy choice."
+  },
+  {
+    "id": "en-medium-01",
+    "language": "en",
+    "tier": "medium",
+    "text": "Social media has changed the way people communicate. Many people use platforms like Instagram and Twitter every day to talk to friends and share their lives. This has some good points and some bad points. On the good side, social media lets people stay connected with friends who live far away, and it can help people find information quickly. On the bad side, social media can be addictive and some studies show it makes teenagers feel more anxious. Also, there is a lot of fake news on social media which is a problem. I think social media companies should do more to stop fake news and protect young users. In conclusion, social media is a powerful tool but it needs to be used carefully. People should try to balance their time online with other activities like exercise and spending time with family in person."
+  },
+  {
+    "id": "en-weak-01",
+    "language": "en",
+    "tier": "weak",
+    "text": "Sport is very good thing for people. Many people they like play sport because is fun and also health. Football is famous sport in many country and basketball too. When you play sport you feel happy and your body become strong. Some people dont like sport because they lazy or they busy with work. I think everyone should try play sport one time every week minimum. My favorite sport is basketball because I play since I was young with my brother. Sport also teach you about teamwork and how to not give up when you lose a game. So sport is important for everyone life."
+  },
+  {
+    "id": "zh-strong-01",
+    "language": "zh",
+    "tier": "strong",
+    "text": "科技的迅猛发展正在深刻改变人们的日常生活，这种改变利大于弊。首先，科技极大提高了生活效率。以移动支付为例，人们无需携带现金即可完成购物、出行等各类消费，节省了大量时间与精力。其次，远程办公和在线教育的普及，使得地理位置不再是获取优质资源的障碍，这对偏远地区的居民尤为重要。当然，也有人担心科技会削弱人与人之间的真实交流，甚至加剧信息茧房效应。这一担忧并非空穴来风，但解决之道并非拒绝科技，而是学会理性使用——例如设定使用时长、主动进行线下社交。总体而言，科技如同一把双刃剑，只要善加利用，其带来的便利与进步将远远超过潜在的风险。因此，我们应当以开放而审慎的态度拥抱科技，而非因噎废食。"
+  },
+  {
+    "id": "zh-medium-01",
+    "language": "zh",
+    "tier": "medium",
+    "text": "现在很多人都喜欢网上购物，因为很方便。你可以在家里买东西，不用去商店，也不用排队。网上购物有很多优点，比如价格便宜，选择也多。但是网上购物也有一些缺点，比如有时候东西质量不好，或者收到的东西和图片不一样。还有一个问题是快递有时候很慢，要等很久才能收到。我觉得网上购物是一个好的方式，但是大家买东西的时候要小心一点，要看清楚评论再买。总的来说，网上购物给我们的生活带来了很多方便，我们应该合理使用它。"
+  },
+  {
+    "id": "zh-weak-01",
+    "language": "zh",
+    "tier": "weak",
+    "text": "我觉得读书是很重要的事情因为读书可以学到很多知识。我小时候不喜欢读书,后来慢慢的喜欢了。读书让我知道很多事情我以前不知道的。有的人不喜欢读书他们喜欢玩手机,我觉得这样不太好。读书比玩手机好因为读书对眼睛也比较好一点。我希望大家都可以多读书,少玩手机,这样对身体和学习都好。读书真的很重要大家应该要读书。"
+  }
+]

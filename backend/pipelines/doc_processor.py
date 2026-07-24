@@ -7,7 +7,7 @@ Sequential stages executed by DocumentProcessor.process():
   2. Parse    – extract raw text  (txt / pdf / docx)
   3. Clean    – normalise encoding, strip noise
   4. Chunk    – sliding-window splits ready for embedding / inference
-  5. Score    – call ai_inference service; deterministic mock fallback
+  5. Score    – agents panel (primary) -> ai_inference (fallback) -> mock (last resort)
 """
 
 from __future__ import annotations
@@ -120,11 +120,6 @@ class ParseError(PipelineError):
         super().__init__(PipelineStage.PARSE, f"Cannot parse '{filename}': {detail}")
 
 
-class InferenceError(PipelineError):
-    def __init__(self, detail: str) -> None:
-        super().__init__(PipelineStage.SCORE, f"AI inference failed: {detail}")
-
-
 # ── Domain Models ──────────────────────────────────────────────────────────────
 
 class UploadedDocument(BaseModel):
@@ -179,6 +174,9 @@ class ScoringResult(BaseModel):
     feedback: list[FeedbackItem]
     summary: str
     model_used: str
+    source_tier: str = Field(
+        description="Which grading path produced this result: agents | ai_inference | mock | manual"
+    )
 
 
 class PipelineResult(BaseModel):
@@ -350,7 +348,7 @@ class TextChunker:
         return chunks
 
 
-# ── AI Inference Client ────────────────────────────────────────────────────────
+# ── Grading Client ─────────────────────────────────────────────────────────────
 
 _GRADE_THRESHOLDS: list[tuple[float, str]] = [
     (90.0, "A"),
@@ -400,12 +398,26 @@ def _score_to_grade(score: float) -> str:
     return "F"
 
 
-class AIInferenceClient:
-    """
-    Async HTTP client for the ai_inference microservice.
+def _severity(rubric_score: float, max_score: float = 25.0) -> str:
+    ratio = rubric_score / max_score if max_score else 0
+    if ratio < 0.5:
+        return "error"
+    if ratio < 0.75:
+        return "warning"
+    return "info"
 
-    Falls back to a deterministic mock when the service is unreachable so
-    the pipeline can be developed and tested without a live inference service.
+
+class GradingClient:
+    """
+    Async HTTP client that scores documents through a three-tier chain:
+
+      1. agents        – multi-agent evaluation panel (primary; richer, bilingual)
+      2. ai_inference   – single-call DeepSeek grader (fallback)
+      3. mock           – deterministic hash-based result (last resort)
+
+    Any agents failure (network error, timeout, HTTP error) falls through to
+    ai_inference; any ai_inference failure falls through to mock. The Score
+    stage therefore never fails the pipeline — it only degrades in richness.
     The mock score is derived from a hash of document_id, making it stable
     across repeated calls for the same document.
     """
@@ -413,11 +425,15 @@ class AIInferenceClient:
     def __init__(
         self,
         base_url: str = "http://ai_inference:8001",
+        agents_base_url: str = "http://agents:8004",
         timeout: float = 30.0,
+        agents_timeout: float = 12.0,
         use_mock: bool = False,
     ) -> None:
         self._base_url = base_url.rstrip("/")
+        self._agents_base_url = agents_base_url.rstrip("/")
         self._timeout = timeout
+        self._agents_timeout = agents_timeout
         self._use_mock = use_mock
 
     async def score_document(
@@ -429,29 +445,119 @@ class AIInferenceClient:
         if self._use_mock:
             return self._build_mock_result(document_id, word_count)
 
-        payload = {
-            "document_id": document_id,
-            "text": "\n\n".join(c.text for c in chunks[:3]),
-            "model": "deepseek-v4-flash",
-        }
+        text = "\n\n".join(c.text for c in chunks[:3])
+
         try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
-                response = await client.post(
-                    f"{self._base_url}/inference/generate", json=payload
-                )
-                response.raise_for_status()
-                return self._parse_live_response(document_id, word_count, response.json())
-        except httpx.HTTPStatusError as exc:
-            raise InferenceError(
-                f"HTTP {exc.response.status_code}: {exc.response.text}"
-            ) from exc
-        except httpx.RequestError as exc:
-            # Gracefully degrade: network issues fall back to mock instead of
-            # crashing the whole pipeline during development.
+            return await self._call_agents(document_id, text)
+        except (httpx.HTTPStatusError, httpx.RequestError) as exc:
             logger.warning(
-                "ai_inference unreachable (%s); using mock fallback", exc
+                "agents unavailable (%s); falling back to ai_inference", exc
+            )
+
+        try:
+            return await self._call_ai_inference(document_id, text, word_count)
+        except (httpx.HTTPStatusError, httpx.RequestError) as exc:
+            logger.warning(
+                "ai_inference unavailable (%s); using mock fallback", exc
             )
             return self._build_mock_result(document_id, word_count)
+
+    async def _call_agents(self, document_id: str, text: str) -> ScoringResult:
+        payload = {
+            "document_id": document_id,
+            "text": text,
+            "language": "zh" if _is_cjk_text(text) else "en",
+        }
+        async with httpx.AsyncClient(timeout=self._agents_timeout) as client:
+            response = await client.post(
+                f"{self._agents_base_url}/agent/evaluate", json=payload
+            )
+            response.raise_for_status()
+            return self._parse_agents_response(document_id, response.json())
+
+    async def _call_ai_inference(
+        self, document_id: str, text: str, word_count: int
+    ) -> ScoringResult:
+        payload = {
+            "document_id": document_id,
+            "text": text,
+            "model": "deepseek-v4-flash",
+        }
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            response = await client.post(
+                f"{self._base_url}/inference/generate", json=payload
+            )
+            response.raise_for_status()
+            return self._parse_live_response(document_id, word_count, response.json())
+
+    def _parse_agents_response(self, document_id: str, data: dict) -> ScoringResult:
+        score = float(data["total_score"])
+        grade = data["grade"]
+        model_used = data.get("model_used", "unknown")
+        strengths: list[str] = data.get("strengths", [])
+        weaknesses: list[str] = data.get("weaknesses", [])
+        suggestions: list[str] = data.get("suggestions", [])
+
+        content_score = float(data.get("content_score", 0.0))
+        structure = data.get("structure_logic", {})
+        vocab = data.get("vocab_grammar", {})
+        style = data.get("style", {})
+
+        def _suggestion(i: int) -> str:
+            return (
+                suggestions[i]
+                if i < len(suggestions)
+                else "See overall feedback for suggestions."
+            )
+
+        feedback_items = [
+            FeedbackItem(
+                category="evidence",
+                severity=_severity(content_score),
+                message=f"Content & Ideas: {content_score:.0f}/25.",
+                suggestion=_suggestion(0),
+            ),
+            FeedbackItem(
+                category="structure",
+                severity=_severity(float(structure.get("raw_score", 0.0))),
+                message="; ".join(structure.get("issues", [])) or "Structure and logic are sound.",
+                suggestion=_suggestion(1),
+            ),
+            FeedbackItem(
+                category="grammar",
+                severity=_severity(float(vocab.get("raw_score", 0.0))),
+                message=f"{vocab.get('error_count', 0)} grammar/usage issue(s) detected.",
+                suggestion=_suggestion(2),
+            ),
+            FeedbackItem(
+                category="vocabulary",
+                severity="info" if vocab.get("vocabulary_richness") == "high" else "warning",
+                message=vocab.get("vocabulary_notes", ""),
+                suggestion=_suggestion(3),
+            ),
+            FeedbackItem(
+                category="clarity",
+                severity=_severity(float(style.get("raw_score", 0.0))),
+                message=f"Descriptive quality: {style.get('descriptive_quality', 'n/a')}.",
+                suggestion=_suggestion(4),
+            ),
+        ]
+
+        summary_parts = []
+        if strengths:
+            summary_parts.append("Strengths: " + "; ".join(strengths))
+        if weaknesses:
+            summary_parts.append("Weaknesses: " + "; ".join(weaknesses))
+
+        return ScoringResult(
+            document_id=document_id,
+            score=score,
+            grade=grade,
+            feedback=feedback_items,
+            summary=" ".join(summary_parts) or "No summary provided.",
+            model_used=model_used,
+            source_tier="agents",
+        )
 
     def _parse_live_response(
         self, document_id: str, word_count: int, data: dict
@@ -468,14 +574,6 @@ class AIInferenceClient:
             "language": "clarity",
             "conventions": "grammar",
         }
-
-        def _severity(rubric_score: float, max_score: float = 25.0) -> str:
-            ratio = rubric_score / max_score if max_score else 0
-            if ratio < 0.5:
-                return "error"
-            if ratio < 0.75:
-                return "warning"
-            return "info"
 
         feedback_items: list[FeedbackItem] = []
         for i, rubric in enumerate(data.get("rubric", [])):
@@ -501,6 +599,7 @@ class AIInferenceClient:
             feedback=feedback_items,
             summary=overall_feedback,
             model_used=model_used,
+            source_tier="ai_inference",
         )
 
     def _build_mock_result(self, document_id: str, word_count: int) -> ScoringResult:
@@ -516,6 +615,7 @@ class AIInferenceClient:
                 "Key areas for improvement: evidence support and sentence conciseness."
             ),
             model_used="mock",
+            source_tier="mock",
         )
 
 
@@ -530,20 +630,20 @@ class DocumentProcessor:
         processor = DocumentProcessor()
         result = await processor.process("essay.pdf", file_bytes)
 
-    Dependency-inject a custom AIInferenceClient to control the scoring
+    Dependency-inject a custom GradingClient to control the scoring
     behaviour in tests (e.g. pass use_mock=True or a subclass).
     """
 
     def __init__(
         self,
-        inference_client: AIInferenceClient | None = None,
+        inference_client: GradingClient | None = None,
         chunk_size: int = DEFAULT_CHUNK_SIZE,
         chunk_overlap: int = DEFAULT_CHUNK_OVERLAP,
     ) -> None:
         self._parsers: list[FileParser] = [TxtParser(), PdfParser(), DocxParser()]
         self._cleaner = TextCleaner()
         self._chunker = TextChunker(chunk_size, chunk_overlap)
-        self._inference = inference_client or AIInferenceClient()
+        self._inference = inference_client or GradingClient()
 
     # ── Public API ─────────────────────────────────────────────────────────────
 

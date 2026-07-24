@@ -26,7 +26,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 
-from doc_processor import AIInferenceClient, DocumentProcessor, TextChunk
+from doc_processor import GradingClient, DocumentProcessor, TextChunk
 
 logger = logging.getLogger(__name__)
 
@@ -67,8 +67,11 @@ class WorkflowStatus(BaseModel):
 _jobs: dict[str, WorkflowStatus] = {}
 
 _AI_INFERENCE_URL = os.getenv("AI_INFERENCE_URL", "http://ai_inference:8001")
-_processor        = DocumentProcessor(inference_client=AIInferenceClient(base_url=_AI_INFERENCE_URL))
-_inference_client = AIInferenceClient(base_url=_AI_INFERENCE_URL)
+_AGENTS_URL       = os.getenv("AGENTS_URL", "http://agents:8004")
+_processor        = DocumentProcessor(
+    inference_client=GradingClient(base_url=_AI_INFERENCE_URL, agents_base_url=_AGENTS_URL)
+)
+_inference_client = GradingClient(base_url=_AI_INFERENCE_URL, agents_base_url=_AGENTS_URL)
 
 
 # ── Background runners ─────────────────────────────────────────────────────────
