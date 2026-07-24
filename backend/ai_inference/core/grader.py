@@ -25,8 +25,10 @@ from core.models import (
     FlagReason,
     GradingResult,
     RubricDimension,
+    RubricDimensionConfig,
     RubricScore,
 )
+from core.rubric_store import get_cached_dimensions
 
 logger = logging.getLogger(__name__)
 
@@ -44,17 +46,46 @@ _GRADE_MAP: list[tuple[float, str]] = [
 ]
 
 # ── Prompt Definition ─────────────────────────────────────────────────────────
+#
+# The rubric section and JSON schema below are built dynamically from
+# admin-configured weights (core/rubric_store.py) rather than hardcoded, so
+# changes made via PUT /rubric/dimensions take effect on the next grade()
+# call without a redeploy.
 
-_SYSTEM_PROMPT = """\
+_DIMENSION_LABELS: dict[RubricDimension, str] = {
+    RubricDimension.CONTENT: "Content & Ideas",
+    RubricDimension.ORGANIZATION: "Organization & Structure",
+    RubricDimension.LANGUAGE: "Language & Style",
+    RubricDimension.CONVENTIONS: "Grammar & Conventions",
+}
+
+# Fallback weights used only if the rubric table is somehow unreachable/empty —
+# mirrors the historical hardcoded 25/25/25/25 split.
+_FALLBACK_DIMENSIONS: list[RubricDimensionConfig] = [
+    RubricDimensionConfig(dimension=dim, max_score=25.0, description="", display_order=i)
+    for i, dim in enumerate(RubricDimension)
+]
+
+
+def _build_system_prompt(dimensions: list[RubricDimensionConfig]) -> str:
+    total = sum(d.max_score for d in dimensions)
+    rubric_lines = "\n".join(
+        f"{i + 1}. {_DIMENSION_LABELS[d.dimension]} ({d.max_score:g} points)"
+        + (f" – {d.description}" if d.description else "")
+        for i, d in enumerate(dimensions)
+    )
+    schema_lines = ",\n    ".join(
+        f'{{"dimension": "{d.dimension.value}", "score": <0-{d.max_score:g}>, "feedback": "<1-2 sentences>"}}'
+        for d in dimensions
+    )
+
+    return f"""\
 You are an expert academic writing evaluator with 15 years of university-level \
 grading experience. Your evaluations are objective, consistent, constructive, \
 and free of demographic bias.
 
-Rubric (25 points each, 100 total):
-1. Content & Ideas       – argument clarity, analytical depth, evidence relevance
-2. Organization & Structure – logical flow, paragraph cohesion, intro/conclusion
-3. Language & Style      – vocabulary richness, sentence variety, academic register
-4. Grammar & Conventions – spelling, punctuation, syntax accuracy
+Rubric ({total:g} points total):
+{rubric_lines}
 
 Confidence guidelines:
 • 0.90–1.00  Clear-cut case (exemplary or clearly failing work)
@@ -69,19 +100,16 @@ Set flag_for_review=true when:
 You MUST respond with a single valid JSON object and nothing else. \
 No markdown fences, no explanation outside the JSON. \
 Required schema:
-{
-  "overall_score": <number 0-100>,
+{{
+  "overall_score": <number 0-{total:g}>,
   "confidence": <number 0.0-1.0>,
   "rubric_scores": [
-    {"dimension": "content",       "score": <0-25>, "feedback": "<1-2 sentences>"},
-    {"dimension": "organization",  "score": <0-25>, "feedback": "<1-2 sentences>"},
-    {"dimension": "language",      "score": <0-25>, "feedback": "<1-2 sentences>"},
-    {"dimension": "conventions",   "score": <0-25>, "feedback": "<1-2 sentences>"}
+    {schema_lines}
   ],
   "overall_feedback": "<2-3 sentence holistic assessment>",
   "improvement_tips": ["<tip 1>", "<tip 2>", "<tip 3>"],
   "flag_for_review": <true|false>
-}\
+}}\
 """
 
 
@@ -163,12 +191,15 @@ class GradingEngine:
         used_model = model or self._default_model
         inference_id = str(uuid.uuid4())
 
+        dimensions = get_cached_dimensions("en") or _FALLBACK_DIMENSIONS
+        max_score_by_dim = {d.dimension: d.max_score for d in dimensions}
+
         response = await self._client.chat.completions.create(
             model=used_model,
             max_tokens=2048,
             response_format={"type": "json_object"},
             messages=[
-                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "system", "content": _build_system_prompt(dimensions)},
                 {
                     "role": "user",
                     "content": f"Please grade the following student composition:\n\n{text}",
@@ -187,6 +218,7 @@ class GradingEngine:
             RubricScore(
                 dimension=RubricDimension(r["dimension"]),
                 score=float(r["score"]),
+                max_score=max_score_by_dim.get(RubricDimension(r["dimension"]), 25.0),
                 feedback=r["feedback"],
             )
             for r in data["rubric_scores"]
@@ -226,14 +258,16 @@ class GradingEngine:
         score = round(55.0 + (seed % 40), 1)
         confidence = round(0.60 + (seed % 35) / 100, 3)
 
-        per_dim = round(score / 4, 1)
+        dimensions = get_cached_dimensions("en") or _FALLBACK_DIMENSIONS
+        total_weight = sum(d.max_score for d in dimensions) or 100.0
         rubric = [
             RubricScore(
-                dimension=dim,
-                score=per_dim,
-                feedback=f"[mock] {dim.value} evaluation placeholder.",
+                dimension=d.dimension,
+                score=round(score * (d.max_score / total_weight), 1),
+                max_score=d.max_score,
+                feedback=f"[mock] {d.dimension.value} evaluation placeholder.",
             )
-            for dim in RubricDimension
+            for d in dimensions
         ]
 
         auto_reason = _auto_flag_reason(score, confidence)

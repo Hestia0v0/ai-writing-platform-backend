@@ -18,6 +18,7 @@ from core.batch_engine import BatchEngine
 from core.cache import InMemoryCache, RedisCache
 from core.grader import GradingEngine
 from core.hitl_store import HITLStore
+from core.rubric_store import RubricStore
 from db.database import get_db
 
 
@@ -55,3 +56,7 @@ def get_batch_engine() -> BatchEngine:
 
 def get_hitl_store(db: Session = Depends(get_db)) -> HITLStore:
     return HITLStore(db)
+
+
+def get_rubric_store(db: Session = Depends(get_db)) -> RubricStore:
+    return RubricStore(db)

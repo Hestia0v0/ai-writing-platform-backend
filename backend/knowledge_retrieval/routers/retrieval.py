@@ -1,8 +1,9 @@
 import numpy as np
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional
 
+from auth import require_role
 from db import get_pool
 from embedder import embed
 
@@ -34,7 +35,7 @@ class TechniqueResult(BaseModel):
     score: float
 
 
-@router.post("/index")
+@router.post("/index", dependencies=[Depends(require_role("admin", "super_admin"))])
 async def index_document(request: IndexRequest):
     vector = await embed(request.content)
     pool = await get_pool()
@@ -113,7 +114,7 @@ async def search_techniques(query: str = "writing"):
     ]
 
 
-@router.delete("/index/{document_id}")
+@router.delete("/index/{document_id}", dependencies=[Depends(require_role("admin", "super_admin"))])
 async def delete_document(document_id: str):
     pool = await get_pool()
     async with pool.acquire() as conn:

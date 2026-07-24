@@ -65,6 +65,29 @@ class GradingResult(BaseModel):
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+# ── Rubric Configuration (admin-managed) ─────────────────────────────────────
+
+class RubricDimensionConfig(BaseModel):
+    dimension: RubricDimension
+    language: str = "en"
+    max_score: float = Field(ge=1.0, le=100.0)
+    description: str = ""
+    display_order: int = 0
+    updated_at: Optional[datetime] = None
+    updated_by: Optional[str] = None
+
+
+class RubricDimensionInput(BaseModel):
+    dimension: RubricDimension
+    max_score: float = Field(ge=1.0, le=100.0)
+    description: Optional[str] = None
+
+
+class RubricDimensionsUpdateRequest(BaseModel):
+    language: str = "en"
+    dimensions: list[RubricDimensionInput] = Field(min_length=1)
+
+
 # ── Single Inference Request ───────────────────────────────────────────────────
 
 class InferenceRequest(BaseModel):

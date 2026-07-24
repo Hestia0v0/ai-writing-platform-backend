@@ -9,6 +9,7 @@ GET  /batch/jobs            List all known jobs
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from auth import require_role
 from core.batch_engine import BatchEngine
 from core.models import BatchJobStatus, BatchSubmitRequest
 from dependencies import get_batch_engine
@@ -84,7 +85,11 @@ async def batch_result(
     return job
 
 
-@router.get("/jobs", summary="List all batch jobs (in-process state)")
+@router.get(
+    "/jobs",
+    summary="List all batch jobs (in-process state)",
+    dependencies=[Depends(require_role("admin", "super_admin"))],
+)
 async def list_jobs(
     batch_engine: BatchEngine = Depends(get_batch_engine),
 ) -> dict:

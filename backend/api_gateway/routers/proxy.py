@@ -12,6 +12,7 @@ Service routing:
 
 import logging
 import os
+import re
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -37,6 +38,25 @@ _SERVICE_MAP: dict[str, tuple[str, bool]] = {
     "agent":     (_AGENTS_URL, True),
 }
 
+# (service, path-prefix regex) -> minimum roles, checked against everything
+# after /api/v1/{service}/. First match wins; anything not listed stays open
+# to any authenticated user. Re-checked inside the downstream service too
+# (defense in depth — ai_inference/knowledge_retrieval ports are also
+# reachable directly in docker-compose, bypassing this gateway).
+_ROLE_ACL: list[tuple[str, "re.Pattern[str]", tuple[str, ...]]] = [
+    ("hitl",      re.compile(r".*"),           ("reviewer", "admin", "super_admin")),
+    ("retrieval", re.compile(r"^index(/.*)?$"), ("admin", "super_admin")),
+    ("batch",     re.compile(r"^jobs$"),        ("admin", "super_admin")),
+]
+
+
+def _required_roles(service: str, path: str) -> tuple[str, ...] | None:
+    for acl_service, pattern, roles in _ROLE_ACL:
+        if service == acl_service and pattern.match(path):
+            return roles
+    return None
+
+
 # Headers that must not be forwarded to/from the upstream.
 _DROP_REQ  = frozenset({"host", "content-length", "transfer-encoding",
                          "connection", "keep-alive", "upgrade", "te", "trailers"})
@@ -49,6 +69,8 @@ async def _forward(request: Request, url: str) -> Response:
     # Inject the authenticated user identity so internal services don't need to re-validate JWT
     if hasattr(request.state, "user_id"):
         headers["X-User-Id"] = request.state.user_id
+    if hasattr(request.state, "roles"):
+        headers["X-User-Role"] = ",".join(request.state.roles)
     body = await request.body()
 
     try:
@@ -91,6 +113,15 @@ async def proxy(service: str, path: str, request: Request) -> Response:
             status_code=404,
             detail=f"Unknown service '{service}'. Valid prefixes: {sorted(_SERVICE_MAP)}",
         )
+
+    required_roles = _required_roles(service, path)
+    if required_roles is not None:
+        caller_roles = set(getattr(request.state, "roles", []))
+        if not caller_roles & set(required_roles):
+            raise HTTPException(
+                status_code=403,
+                detail=f"Requires one of roles: {sorted(required_roles)}.",
+            )
 
     base, preserve = entry
     if preserve:
