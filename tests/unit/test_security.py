@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../backend/pipeli
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../backend/ai_inference"))
 
 from routers.inference import detect_prompt_injection           # ai_inference
-from doc_processor import AIInferenceClient, DocumentProcessor  # pipelines
+from doc_processor import GradingClient, DocumentProcessor      # pipelines
 
 from main import app as inference_app                            # ai_inference
 
@@ -23,7 +23,7 @@ inference_client = TestClient(inference_app)
 # ── Fixtures / helpers ────────────────────────────────────────────────────────
 
 def _processor() -> DocumentProcessor:
-    return DocumentProcessor(inference_client=AIInferenceClient(use_mock=True))
+    return DocumentProcessor(inference_client=GradingClient(use_mock=True))
 
 
 NORMAL_ESSAY = (
