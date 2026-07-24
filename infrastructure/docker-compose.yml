@@ -4,17 +4,19 @@ networks:
 
 volumes:
   redis_data:     # Railway Redis 方案：删除此行
+  postgres_data:
 
 services:
   # ─── Frontend ──────────────────────────────────────────────
   frontend:
+    profiles: ["frontend"]
     build:
       context: ../../ai-writing-platform-frontend
       dockerfile: Dockerfile
       args:
         - VITE_API_GATEWAY_URL=http://localhost:8000
     ports:
-      - "3000:3000"
+      - "${FRONTEND_PORT:-3001}:3000"
     depends_on:
       - api_gateway
     networks:
@@ -35,37 +37,54 @@ services:
       - KNOWLEDGE_RETRIEVAL_URL=http://knowledge_retrieval:8002
       - PIPELINES_URL=http://pipelines:8003
       - AGENTS_URL=http://agents:8004
-      - POSTGRES_DSN=${POSTGRES_DSN}
+      - POSTGRES_DSN=${POSTGRES_DSN:-postgresql://platform:platform-local@postgres:5432/platform}
       - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
       - SUPER_ADMIN_EMAIL=${SUPER_ADMIN_EMAIL:-}
-      - CORS_ORIGINS=http://localhost:3000
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:5173,http://localhost:3001}
       - REDIS_URL=redis://redis:6379/2
       # Railway Redis：将上一行替换为：
       # - REDIS_URL=${REDIS_GATEWAY_URL}
-      - FRONTEND_URL=http://localhost:3000
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:5173}
       - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
       - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
       - STRIPE_PRICE_BASIC=${STRIPE_PRICE_BASIC:-}
       - STRIPE_PRICE_PRO=${STRIPE_PRICE_PRO:-}
+      - SMTP_HOST=${SMTP_HOST:-smtp.qq.com}
+      - SMTP_PORT=${SMTP_PORT:-465}
+      - SMTP_USERNAME=${SMTP_USERNAME:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_FROM=${SMTP_FROM:-}
+      - SMTP_FROM_NAME=${SMTP_FROM_NAME:-AI Writing Platform}
+      - SMTP_USE_SSL=${SMTP_USE_SSL:-true}
+      - SMTP_TIMEOUT_SECONDS=${SMTP_TIMEOUT_SECONDS:-10}
+      - EMAIL_CODE_TTL_SECONDS=${EMAIL_CODE_TTL_SECONDS:-600}
+      - EMAIL_CODE_COOLDOWN_SECONDS=${EMAIL_CODE_COOLDOWN_SECONDS:-60}
+      - EMAIL_CODE_MAX_ATTEMPTS=${EMAIL_CODE_MAX_ATTEMPTS:-5}
     depends_on:
-      - redis     # Railway Redis：删除此行
-      - ai_inference
-      - knowledge_retrieval
-      - pipelines
-      - agents
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      ai_inference:
+        condition: service_started
+      knowledge_retrieval:
+        condition: service_started
+      pipelines:
+        condition: service_started
     networks:
       - platform_net
     restart: unless-stopped
 
   # ─── Agents Service ────────────────────────────────────────
   agents:
+    profiles: ["ai"]
     build:
       context: ../backend/agents
       dockerfile: Dockerfile
     ports:
       - "8004:8004"
     environment:
-      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
       - GUARDRAIL_MODEL=${GUARDRAIL_MODEL:-deepseek-chat}
       - DRAFTING_MODEL=${DRAFTING_MODEL:-deepseek-chat}
       - EVAL_MODEL=${EVAL_MODEL:-deepseek-chat}
@@ -77,8 +96,10 @@ services:
       - KNOWLEDGE_RETRIEVAL_URL=http://knowledge_retrieval:8002
       - REDIS_URL=redis://redis:6379/3
     depends_on:
-      - knowledge_retrieval
-      - redis
+      knowledge_retrieval:
+        condition: service_started
+      redis:
+        condition: service_started
     networks:
       - platform_net
     restart: unless-stopped
@@ -93,13 +114,16 @@ services:
     volumes:
       - ./certs:/certs:ro
     environment:
-      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
       - REDIS_URL=redis://redis:6379/0
       # Railway Redis：将上一行替换为：
       # - REDIS_URL=${REDIS_INFERENCE_URL}
-      - DATABASE_URL=${POSTGRES_DSN}
+      - DATABASE_URL=${POSTGRES_DSN:-postgresql://platform:platform-local@postgres:5432/platform}
     depends_on:
-      - redis     # Railway Redis：删除此行
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
     networks:
       - platform_net
     restart: unless-stopped
@@ -114,7 +138,10 @@ services:
     volumes:
       - ./certs:/certs:ro
     environment:
-      - POSTGRES_DSN=${POSTGRES_DSN}
+      - POSTGRES_DSN=${POSTGRES_DSN:-postgresql://platform:platform-local@postgres:5432/platform}
+    depends_on:
+      postgres:
+        condition: service_healthy
     networks:
       - platform_net
     restart: unless-stopped
@@ -135,12 +162,37 @@ services:
       - AI_INFERENCE_URL=http://ai_inference:8001
       - AGENTS_URL=http://agents:8004
       - KNOWLEDGE_RETRIEVAL_URL=http://knowledge_retrieval:8002
-      - POSTGRES_DSN=${POSTGRES_DSN}
+      - POSTGRES_DSN=${POSTGRES_DSN:-postgresql://platform:platform-local@postgres:5432/platform}
     depends_on:
-      - redis     # Railway Redis：删除此行
-      - ai_inference
-      - agents
-      - knowledge_retrieval
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      ai_inference:
+        condition: service_started
+      knowledge_retrieval:
+        condition: service_started
+    networks:
+      - platform_net
+    restart: unless-stopped
+
+  # ─── PostgreSQL + pgvector ────────────────────────────────
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-platform}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-platform-local}
+      POSTGRES_DB: ${POSTGRES_DB:-platform}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/001-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-platform} -d ${POSTGRES_DB:-platform}"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
     networks:
       - platform_net
     restart: unless-stopped
