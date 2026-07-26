@@ -16,7 +16,13 @@ from routers import admin, auth, billing, health, proxy
 
 logger = logging.getLogger(__name__)
 
-_CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
+_CORS_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv(
+        "CORS_ORIGINS", "http://localhost:5173,http://localhost:3001"
+    ).split(",")
+    if origin.strip()
+]
 _SUPER_ADMIN_EMAIL = os.getenv("SUPER_ADMIN_EMAIL", "")
 
 # Paths that don't require a JWT token
@@ -61,13 +67,15 @@ def _get_user_plan(user_id: str) -> str:
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT plan FROM subscriptions WHERE user_id = %s",
+                "SELECT plan, status FROM subscriptions WHERE user_id = %s",
                 (user_id,),
             )
             row = cur.fetchone()
     finally:
         conn.close()
-    return row["plan"] if row else "free"
+    if not row or row["status"] not in {"active", "trialing", "past_due"}:
+        return "free"
+    return row["plan"]
 
 
 def _check_quota(user_id: str) -> Optional[JSONResponse]:

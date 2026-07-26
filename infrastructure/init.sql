@@ -66,9 +66,13 @@ CREATE INDEX IF NOT EXISTS idx_user_roles_user_id ON user_roles (user_id);
 
 -- ── Billing: Subscriptions ───────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS subscriptions (
-    user_id            TEXT        PRIMARY KEY REFERENCES users(user_id),
-    stripe_customer_id TEXT,
-    plan               TEXT        NOT NULL DEFAULT 'free',
-    status             TEXT        NOT NULL DEFAULT 'none',
-    current_period_end TIMESTAMPTZ
+    user_id                 TEXT        PRIMARY KEY REFERENCES users(user_id),
+    stripe_customer_id      TEXT        UNIQUE,
+    stripe_subscription_id  TEXT        UNIQUE,
+    stripe_price_id         TEXT,
+    plan                    TEXT        NOT NULL DEFAULT 'free',
+    status                  TEXT        NOT NULL DEFAULT 'none',
+    current_period_end      TIMESTAMPTZ,
+    cancel_at_period_end    BOOLEAN     NOT NULL DEFAULT FALSE,
+    updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
