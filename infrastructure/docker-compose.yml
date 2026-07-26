@@ -37,7 +37,7 @@ services:
       - KNOWLEDGE_RETRIEVAL_URL=http://knowledge_retrieval:8002
       - PIPELINES_URL=http://pipelines:8003
       - AGENTS_URL=http://agents:8004
-      - POSTGRES_DSN=${POSTGRES_DSN:-postgresql://platform:platform-local@postgres:5432/platform}
+      - POSTGRES_DSN=postgresql://${POSTGRES_USER:-platform}:${POSTGRES_PASSWORD:-platform}@postgres:5432/${POSTGRES_DB:-platform}
       - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
       - SUPER_ADMIN_EMAIL=${SUPER_ADMIN_EMAIL:-}
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:5173,http://localhost:3001}
@@ -118,7 +118,7 @@ services:
       - REDIS_URL=redis://redis:6379/0
       # Railway Redis：将上一行替换为：
       # - REDIS_URL=${REDIS_INFERENCE_URL}
-      - DATABASE_URL=${POSTGRES_DSN:-postgresql://platform:platform-local@postgres:5432/platform}
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-platform}:${POSTGRES_PASSWORD:-platform}@postgres:5432/${POSTGRES_DB:-platform}
     depends_on:
       postgres:
         condition: service_healthy
@@ -138,7 +138,7 @@ services:
     volumes:
       - ./certs:/certs:ro
     environment:
-      - POSTGRES_DSN=${POSTGRES_DSN:-postgresql://platform:platform-local@postgres:5432/platform}
+      - POSTGRES_DSN=postgresql://${POSTGRES_USER:-platform}:${POSTGRES_PASSWORD:-platform}@postgres:5432/${POSTGRES_DB:-platform}
     depends_on:
       postgres:
         condition: service_healthy
@@ -162,7 +162,7 @@ services:
       - AI_INFERENCE_URL=http://ai_inference:8001
       - AGENTS_URL=http://agents:8004
       - KNOWLEDGE_RETRIEVAL_URL=http://knowledge_retrieval:8002
-      - POSTGRES_DSN=${POSTGRES_DSN:-postgresql://platform:platform-local@postgres:5432/platform}
+      - POSTGRES_DSN=postgresql://${POSTGRES_USER:-platform}:${POSTGRES_PASSWORD:-platform}@postgres:5432/${POSTGRES_DB:-platform}
     depends_on:
       postgres:
         condition: service_healthy

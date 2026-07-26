@@ -13,6 +13,7 @@ services:
       KNOWLEDGE_RETRIEVAL_URL: http://knowledge_retrieval:8002
       POSTGRES_DSN: ${POSTGRES_DSN:?POSTGRES_DSN is required}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      SUPER_ADMIN_EMAIL: ${SUPER_ADMIN_EMAIL:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       REDIS_URL: redis://redis:6379/0
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
@@ -20,6 +21,17 @@ services:
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
       STRIPE_PRICE_BASIC: ${STRIPE_PRICE_BASIC:-}
       STRIPE_PRICE_PRO: ${STRIPE_PRICE_PRO:-}
+      SMTP_HOST: ${SMTP_HOST:-smtp.qq.com}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-AI Writing Platform}
+      SMTP_USE_SSL: ${SMTP_USE_SSL:-true}
+      SMTP_TIMEOUT_SECONDS: ${SMTP_TIMEOUT_SECONDS:-10}
+      EMAIL_CODE_TTL_SECONDS: ${EMAIL_CODE_TTL_SECONDS:-600}
+      EMAIL_CODE_COOLDOWN_SECONDS: ${EMAIL_CODE_COOLDOWN_SECONDS:-60}
+      EMAIL_CODE_MAX_ATTEMPTS: ${EMAIL_CODE_MAX_ATTEMPTS:-5}
     depends_on:
       redis:
         condition: service_started
