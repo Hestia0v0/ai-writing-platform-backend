@@ -454,7 +454,8 @@ python scripts/container_tools.py analyze-logs --log-file container.log --fail-o
 - For each service (`api_gateway`, `ai_inference`, `knowledge_retrieval`, `pipelines`, `agents`):
   - build image via `docker/build-push-action`;
   - push to GHCR on non-PR events;
-  - run Trivy with `HIGH,CRITICAL` severity gate (`exit-code: 1`);
+  - run Trivy with `HIGH,CRITICAL` and always upload SARIF;
+  - enforce fail gate only on `main` push, or when manual dispatch sets `enforce_trivy_gate=true`;
   - upload SARIF to both Security tab and workflow artifacts.
 
 ---

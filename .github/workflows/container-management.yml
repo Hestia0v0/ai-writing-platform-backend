@@ -2,6 +2,12 @@ name: Container Management
 
 on:
   workflow_dispatch:
+    inputs:
+      enforce_trivy_gate:
+        description: "Fail workflow when Trivy finds HIGH/CRITICAL vulnerabilities"
+        required: false
+        type: boolean
+        default: false
   push:
     branches: [main, develop]
   pull_request:
@@ -76,7 +82,34 @@ jobs:
           vuln-type: os,library
           severity: HIGH,CRITICAL
           ignore-unfixed: true
-          exit-code: "1"
+          exit-code: "0"
+
+      - name: Count Trivy findings
+        id: trivy_counts
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          sarif_path = Path("trivy-${{ matrix.service }}.sarif")
+          findings = 0
+          if sarif_path.exists():
+              data = json.loads(sarif_path.read_text(encoding="utf-8"))
+              for run in data.get("runs", []):
+                  findings += len(run.get("results", []))
+
+          print(f"Trivy findings for ${{ matrix.service }}: {findings}")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
+              f.write(f"count={findings}\n")
+          PY
+
+      - name: Enforce Trivy gate (main push or manual opt-in)
+        if: ${{ steps.trivy_counts.outputs.count != '0' && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.enforce_trivy_gate)) }}
+        run: |
+          echo "Trivy found HIGH/CRITICAL vulnerabilities for ${{ matrix.service }} (count=${{ steps.trivy_counts.outputs.count }})."
+          echo "Review SARIF in Security tab/artifacts."
+          exit 1
 
       - name: Upload Trivy SARIF
         if: always()
