@@ -1,0 +1,289 @@
+name: Security Compliance
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  sast-rescan:
+    name: SAST Rescan (Bandit + Semgrep)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install SAST tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install bandit semgrep
+
+      - name: Run Bandit and Semgrep
+        run: |
+          mkdir -p artifacts/sast
+          bandit -r backend -f json -o artifacts/sast/bandit.json || true
+          semgrep scan --config auto --json --output artifacts/sast/semgrep.json backend tests || true
+          semgrep scan --config auto --sarif --output artifacts/sast/semgrep.sarif backend tests || true
+
+      - name: Upload Semgrep SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: artifacts/sast/semgrep.sarif
+
+      - name: Enforce SAST gate
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          bandit_file = Path("artifacts/sast/bandit.json")
+          semgrep_file = Path("artifacts/sast/semgrep.json")
+          bandit = json.loads(bandit_file.read_text(encoding="utf-8")) if bandit_file.exists() else {}
+          semgrep = json.loads(semgrep_file.read_text(encoding="utf-8")) if semgrep_file.exists() else {}
+          bandit_count = len(bandit.get("results", []))
+          semgrep_count = len(semgrep.get("results", []))
+          total = bandit_count + semgrep_count
+          print(f"Bandit findings: {bandit_count}")
+          print(f"Semgrep findings: {semgrep_count}")
+          with open("artifacts/sast/rescan-summary.md", "w", encoding="utf-8") as f:
+            f.write("# SAST Rescan Summary\n\n")
+            f.write(f"- Bandit findings: `{bandit_count}`\n")
+            f.write(f"- Semgrep findings: `{semgrep_count}`\n")
+            f.write(f"- Total findings: `{total}`\n")
+          if total:
+            raise SystemExit("SAST rescan has unresolved findings.")
+          PY
+
+      - name: Upload SAST artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sast-results
+          path: artifacts/sast/
+          if-no-files-found: error
+
+  iac-rescan:
+    name: IaC Rescan (Checkov)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Checkov
+        run: |
+          python -m pip install --upgrade pip
+          pip install checkov
+
+      - name: Run Checkov on IaC definitions
+        run: |
+          mkdir -p artifacts/iac
+          checkov \
+            -d . \
+            --framework dockerfile,github_actions,secrets \
+            --skip-path .git \
+            --skip-path .venv \
+            --skip-path tests \
+            -o json > artifacts/iac/checkov.json || true
+
+      - name: Enforce IaC gate
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("artifacts/iac/checkov.json")
+          data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+          summary = data.get("summary", {})
+          failed = int(summary.get("failed", 0)) if isinstance(summary, dict) else 0
+          passed = int(summary.get("passed", 0)) if isinstance(summary, dict) else 0
+          skipped = int(summary.get("skipped", 0)) if isinstance(summary, dict) else 0
+          print(f"Checkov passed={passed}, failed={failed}, skipped={skipped}")
+          with open("artifacts/iac/rescan-summary.md", "w", encoding="utf-8") as f:
+            f.write("# IaC Rescan Summary\n\n")
+            f.write(f"- Passed: `{passed}`\n")
+            f.write(f"- Failed: `{failed}`\n")
+            f.write(f"- Skipped: `{skipped}`\n")
+          if failed:
+            raise SystemExit("IaC rescan has unresolved findings.")
+          PY
+
+      - name: Upload IaC artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iac-results
+          path: artifacts/iac/
+          if-no-files-found: error
+
+  dast-rescan:
+    name: DAST Rescan (OWASP ZAP Baseline)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare artifact directory
+        run: mkdir -p artifacts/dast
+
+      - name: Start docker-compose stack
+        working-directory: infrastructure
+        run: |
+          cp .env.example .env
+          docker compose up -d --wait
+
+      - name: Run OWASP ZAP baseline
+        run: |
+          set +e
+          docker run --rm \
+            --add-host=host.docker.internal:host-gateway \
+            -v "${{ github.workspace }}:/zap/wrk" \
+            ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py \
+            -t http://host.docker.internal:8000 \
+            -J /zap/wrk/artifacts/dast/zap-report.json \
+            -r /zap/wrk/artifacts/dast/zap-report.html \
+            -w /zap/wrk/artifacts/dast/zap-report.md \
+            -x /zap/wrk/artifacts/dast/zap-report.xml \
+            -m 3
+          echo $? > artifacts/dast/zap-exit-code.txt
+          set -e
+
+      - name: Enforce DAST gate
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = Path("artifacts/dast/zap-report.json")
+          data = json.loads(report.read_text(encoding="utf-8")) if report.exists() else {}
+          alerts = 0
+          for site in data.get("site", []):
+            alerts += len(site.get("alerts", []))
+          print(f"ZAP alerts: {alerts}")
+          with open("artifacts/dast/rescan-summary.md", "w", encoding="utf-8") as f:
+            f.write("# DAST Rescan Summary\n\n")
+            f.write(f"- ZAP alerts: `{alerts}`\n")
+          if alerts:
+            raise SystemExit("DAST rescan has unresolved alerts.")
+          PY
+
+      - name: Capture docker compose logs
+        if: always()
+        working-directory: infrastructure
+        run: |
+          mkdir -p ../artifacts/dast
+          docker compose logs --no-color > ../artifacts/dast/docker-compose.log
+
+      - name: Stop docker-compose stack
+        if: always()
+        working-directory: infrastructure
+        run: docker compose down -v
+
+      - name: Upload DAST artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dast-results
+          path: artifacts/dast/
+          if-no-files-found: error
+
+  git-audit-trace:
+    name: Git Audit Trail
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Generate Git audit report
+        run: |
+          python scripts/git_audit_report.py \
+            --json-out artifacts/audit/git-audit-report.json \
+            --md-out artifacts/audit/git-audit-report.md \
+            --limit 300
+
+      - name: Upload Git audit artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: git-audit-results
+          path: artifacts/audit/
+          if-no-files-found: error
+
+  compliance-evidence:
+    name: Compliance Evidence (SOC2/HIPAA/GDPR)
+    runs-on: ubuntu-latest
+    needs: [sast-rescan, iac-rescan, dast-rescan, git-audit-trace]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Download SAST artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: sast-results
+          path: artifacts/sast
+
+      - name: Download IaC artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: iac-results
+          path: artifacts/iac
+
+      - name: Download DAST artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dast-results
+          path: artifacts/dast
+
+      - name: Download Git audit artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: git-audit-results
+          path: artifacts/audit
+
+      - name: Build compliance evidence report
+        run: |
+          python scripts/compliance_evidence.py \
+            --artifacts-dir artifacts \
+            --json-out artifacts/compliance/compliance-evidence.json \
+            --md-out artifacts/compliance/compliance-evidence.md
+
+      - name: Publish compliance summary
+        if: always()
+        run: cat artifacts/compliance/compliance-evidence.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload compliance artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compliance-results
+          path: artifacts/compliance/
+          if-no-files-found: error

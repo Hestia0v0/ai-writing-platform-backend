@@ -424,6 +424,22 @@ The `.github/workflows/ci.yml` workflow contains four jobs:
 
 ---
 
+## Security & Compliance Pipeline
+
+The repository includes `.github/workflows/security-compliance.yml`, which runs on
+`push`, `pull_request`, and manual dispatch with auditable outputs:
+
+- **SAST rescan** with Bandit + Semgrep
+- **DAST rescan** with OWASP ZAP baseline scan
+- **IaC rescan** with Checkov (Dockerfile/GitHub Actions/secrets)
+- **Git audit trail** artifact generation from repository history
+- **SOC2/HIPAA/GDPR evidence report** built from the scan artifacts
+
+Detailed usage and local reproduction instructions are in
+`docs/security-compliance.md`.
+
+---
+
 ## Container Management
 
 The project now includes end-to-end container management coverage for:
