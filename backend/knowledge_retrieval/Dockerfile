@@ -1,8 +1,7 @@
 FROM python:3.12-slim
 WORKDIR /app
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt \
-    -i https://pypi.tuna.tsinghua.edu.cn/simple
+RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 RUN addgroup --system app && adduser --system --ingroup app app && chown -R app:app /app
 EXPOSE 8002
