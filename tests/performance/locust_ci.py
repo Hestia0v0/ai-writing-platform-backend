@@ -33,11 +33,11 @@ class GatewaySmokeUser(HttpUser):
         self.client.get("/health/", name="GET /health/")
 
     @task(3)
-    def inference_health_via_gateway(self) -> None:
+    def inference_cache_stats_via_gateway(self) -> None:
         self.client.get(
-            "/api/v1/inference/health/",
+            "/api/v1/inference/cache/stats",
             headers=self._headers,
-            name="GET /api/v1/inference/health/",
+            name="GET /api/v1/inference/cache/stats",
         )
 
     @task(3)

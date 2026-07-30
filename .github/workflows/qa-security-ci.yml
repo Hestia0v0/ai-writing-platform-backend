@@ -78,6 +78,18 @@ jobs:
           cp .env.example .env
           docker compose up -d --wait
 
+      - name: Wait for gateway health
+        run: |
+          for i in {1..30}; do
+            if curl -fsS http://localhost:8000/health/ > /dev/null; then
+              echo "Gateway is ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Gateway did not become ready in time"
+          exit 1
+
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
@@ -128,6 +140,18 @@ jobs:
         run: |
           cp .env.example .env
           docker compose up -d --wait
+
+      - name: Wait for gateway health
+        run: |
+          for i in {1..30}; do
+            if curl -fsS http://localhost:8000/health/ > /dev/null; then
+              echo "Gateway is ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Gateway did not become ready in time"
+          exit 1
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5

@@ -30,9 +30,9 @@ def test_gateway_health(http_client):
 
 
 @pytest.mark.integration
-def test_gateway_proxy_inference_health(http_client):
+def test_gateway_proxy_inference_cache_stats(http_client):
     response = http_client.get(
-        f"{GATEWAY_URL}/api/v1/inference/health/",
+        f"{GATEWAY_URL}/api/v1/inference/cache/stats",
         headers={"Authorization": _ci_bearer_token()},
     )
     assert response.status_code == 200
