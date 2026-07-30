@@ -271,25 +271,25 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: sast-results
-          path: artifacts/sast
+          path: .
 
       - name: Download IaC artifacts
         uses: actions/download-artifact@v4
         with:
           name: iac-results
-          path: artifacts/iac
+          path: .
 
       - name: Download DAST artifacts
         uses: actions/download-artifact@v4
         with:
           name: dast-results
-          path: artifacts/dast
+          path: .
 
       - name: Download Git audit artifacts
         uses: actions/download-artifact@v4
         with:
           name: git-audit-results
-          path: artifacts/audit
+          path: .
 
       - name: Build compliance evidence report
         run: |
