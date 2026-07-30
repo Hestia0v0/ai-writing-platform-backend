@@ -46,13 +46,18 @@ def _count_semgrep_issues(path: Path) -> int:
 
 def _count_semgrep_blocking(path: Path) -> int:
     data = _safe_json(path)
-    return len(
-        [
-            r
-            for r in data.get("results", [])
-            if r.get("extra", {}).get("severity") == "ERROR"
-        ]
-    )
+    count = 0
+    for result in data.get("results", []):
+        extra = result.get("extra", {})
+        metadata = extra.get("metadata", {})
+        if (
+            extra.get("severity") == "ERROR"
+            and metadata.get("category") == "security"
+            and metadata.get("confidence") == "HIGH"
+            and metadata.get("impact") == "HIGH"
+        ):
+            count += 1
+    return count
 
 
 def _count_checkov_issues(path: Path) -> int:
