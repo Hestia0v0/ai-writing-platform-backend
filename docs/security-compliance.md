@@ -24,8 +24,11 @@ All jobs in the `Security Compliance` workflow must be green:
 
 ### SAST gate policy (implemented)
 
+- Semgrep in CI is scoped to Python application code (`*.py`); Dockerfile and
+  workflow security checks are enforced by the IaC Checkov stage.
 - Bandit blocks only `MEDIUM/HIGH` severity findings with `MEDIUM/HIGH` confidence.
-- Semgrep blocks only findings with severity `ERROR`.
+- Semgrep blocks only findings that are all of:
+  `severity=ERROR`, `category=security`, `confidence=HIGH`, `impact=HIGH`.
 - Warning/audit findings are still preserved in artifacts for manual triage.
 
 ## Manual local checks
