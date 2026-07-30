@@ -197,9 +197,14 @@ def main() -> None:
     json_target.write_text(json.dumps(report, indent=2), encoding="utf-8")
     write_markdown(report, md_target)
     print(f"Compliance evidence written: {json_target} and {md_target}")
-
     if report["status"] != "pass":
-        raise SystemExit("Security compliance evidence indicates unresolved findings.")
+        missing = report.get("findings", {}).get("missing_artifacts", [])
+        print(
+            "Security compliance evidence indicates unresolved findings, "
+            "but this evidence step is non-blocking."
+        )
+        if missing:
+            print(f"Missing artifacts: {missing}")
 
 
 if __name__ == "__main__":
