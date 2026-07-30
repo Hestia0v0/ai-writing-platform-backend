@@ -20,6 +20,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Prepare artifact directory
+        run: mkdir -p artifacts/unit
+
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
@@ -28,23 +31,20 @@ jobs:
           cache-dependency-path: |
             backend/api_gateway/requirements.txt
             backend/ai_inference/requirements.txt
-            backend/knowledge_retrieval/requirements.txt
             backend/pipelines/requirements.txt
-            backend/agents/requirements.txt
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r backend/api_gateway/requirements.txt
           pip install -r backend/ai_inference/requirements.txt
-          pip install -r backend/knowledge_retrieval/requirements.txt
           pip install -r backend/pipelines/requirements.txt
-          pip install -r backend/agents/requirements.txt
-          pip install pytest httpx pytest-asyncio
+          pip install pytest httpx pytest-asyncio pyjwt
 
       - name: Run unit tests and generate JUnit XML
+        id: unit_tests
+        continue-on-error: true
         run: |
-          mkdir -p artifacts/unit
           pytest \
             tests/unit/test_api_gateway.py \
             tests/unit/test_ai_inference.py \
@@ -54,13 +54,31 @@ jobs:
             -v --tb=short \
             --junitxml=artifacts/unit/pytest-unit.xml
 
+      - name: Ensure unit artifacts exist
+        if: always()
+        run: |
+          touch artifacts/unit/.keep
+          if [ ! -f artifacts/unit/pytest-unit.xml ]; then
+            cat <<'EOF' > artifacts/unit/pytest-unit.xml
+          <testsuite name="unit-tests" tests="0" failures="1">
+            <testcase classname="workflow" name="pytest_not_executed_or_failed_early">
+              <failure message="pytest did not produce JUnit XML">See job logs for root cause.</failure>
+            </testcase>
+          </testsuite>
+          EOF
+          fi
+
       - name: Upload unit test artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: unit-test-results
           path: artifacts/unit/
-          if-no-files-found: error
+          if-no-files-found: warn
+
+      - name: Fail if unit tests failed
+        if: steps.unit_tests.outcome == 'failure'
+        run: exit 1
 
   integration-tests:
     name: Integration Tests (with JUnit artifact)
@@ -101,9 +119,25 @@ jobs:
           pip install pytest httpx pyjwt
 
       - name: Run integration tests and generate JUnit XML
+        id: integration_tests
+        continue-on-error: true
         run: |
           pytest tests/integration -v -m integration --tb=short \
             --junitxml=artifacts/integration/pytest-integration.xml
+
+      - name: Ensure integration artifacts exist
+        if: always()
+        run: |
+          touch artifacts/integration/.keep
+          if [ ! -f artifacts/integration/pytest-integration.xml ]; then
+            cat <<'EOF' > artifacts/integration/pytest-integration.xml
+          <testsuite name="integration-tests" tests="0" failures="1">
+            <testcase classname="workflow" name="pytest_not_executed_or_failed_early">
+              <failure message="pytest did not produce JUnit XML">See job logs for root cause.</failure>
+            </testcase>
+          </testsuite>
+          EOF
+          fi
 
       - name: Capture docker compose logs
         if: always()
@@ -123,7 +157,11 @@ jobs:
         with:
           name: integration-test-results
           path: artifacts/integration/
-          if-no-files-found: error
+          if-no-files-found: warn
+
+      - name: Fail if integration tests failed
+        if: steps.integration_tests.outcome == 'failure'
+        run: exit 1
 
   load-stress-tests:
     name: Load/Stress Tests (Locust artifacts)
@@ -164,6 +202,8 @@ jobs:
           pip install locust pyjwt
 
       - name: Run Locust and export reports
+        id: load_tests
+        continue-on-error: true
         run: |
           locust -f tests/performance/locust_ci.py \
             --host http://localhost:8000 \
@@ -173,6 +213,16 @@ jobs:
             --headless \
             --html artifacts/load/locust-report.html \
             --csv artifacts/load/locust
+
+      - name: Ensure load artifacts exist
+        if: always()
+        run: |
+          touch artifacts/load/.keep
+          if [ ! -f artifacts/load/locust-report.html ]; then
+            cat <<'EOF' > artifacts/load/locust-report.html
+          <html><body><h1>Locust report missing</h1><p>Locust did not produce HTML report; see job logs.</p></body></html>
+          EOF
+          fi
 
       - name: Capture docker compose logs
         if: always()
@@ -192,7 +242,11 @@ jobs:
         with:
           name: load-stress-test-results
           path: artifacts/load/
-          if-no-files-found: error
+          if-no-files-found: warn
+
+      - name: Fail if load/stress tests failed
+        if: steps.load_tests.outcome == 'failure'
+        run: exit 1
 
   sast:
     name: SAST (Bandit + Semgrep artifacts)
