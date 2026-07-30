@@ -182,8 +182,13 @@ class EvaluationResult(BaseModel):
     structure_logic: StructureLogicAnalysis
     style: StyleAnalysis
     content_score: float = Field(
-        default=0.0, ge=0.0, le=25.0,
-        description="Content & Ideas dimension score (0–25)",
+        default=0.0, ge=0.0, le=100.0,
+        description=(
+            "Content & Ideas dimension score. Historically 0-25; the upper "
+            "bound now tracks the admin-configured 'content' rubric weight "
+            "(see agents/evaluation/rubric_client.py), so this Field bound "
+            "is intentionally generous rather than a fixed 25."
+        ),
     )
     creativity_score: float = Field(
         default=0.0, ge=0.0, le=10.0,
@@ -219,6 +224,14 @@ class EvaluationResult(BaseModel):
     cache_hit: bool = Field(
         default=False,
         description="True when this result was served from the evaluation cache (US-17)",
+    )
+    flagged_for_review: bool = Field(
+        default=False,
+        description="True when the Consistency Arbiter ran because sub-scores disagreed sharply",
+    )
+    flag_reason: Optional[str] = Field(
+        default=None,
+        description="Explanation set by the Consistency Arbiter when flagged_for_review is True",
     )
 
 

@@ -14,10 +14,19 @@ def test_root():
     assert response.status_code == 200
 
 
+def test_index_document_requires_admin_role():
+    response = client.post(
+        "/retrieval/index",
+        json={"document_id": "doc-001", "content": "Sample document text."},
+    )
+    assert response.status_code == 403
+
+
 def test_index_document():
     response = client.post(
         "/retrieval/index",
         json={"document_id": "doc-001", "content": "Sample document text."},
+        headers={"X-User-Role": "admin"},
     )
     assert response.status_code == 200
     assert response.json()["status"] == "indexed"

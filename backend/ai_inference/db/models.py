@@ -5,7 +5,7 @@ Only the review_queue table lives here; all domain logic stays in core/.
 
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, Float, Integer, JSON, String, Text
+from sqlalchemy import Boolean, Column, DateTime, Float, Integer, JSON, String, Text, UniqueConstraint
 
 from db.database import Base
 
@@ -43,3 +43,25 @@ class ReviewQueueORM(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     assigned_at = Column(DateTime, nullable=True)
     resolved_at = Column(DateTime, nullable=True)
+
+
+class RubricDimensionORM(Base):
+    """
+    Admin-configurable rubric weights, read by GradingEngine (this service)
+    and, via HTTP, by the agents service's Master Judge (content dimension
+    only — see agents/agents/evaluation/rubric_client.py).
+    """
+    __tablename__ = "rubric_dimensions"
+    __table_args__ = (UniqueConstraint("dimension", "language", name="uq_rubric_dim_lang"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    dimension = Column(String(50), nullable=False)     # content | organization | language | conventions
+    language = Column(String(10), nullable=False, default="en")
+    max_score = Column(Float, nullable=False, default=25.0)
+    description = Column(Text, default="")
+    display_order = Column(Integer, default=0)
+    is_active = Column(Boolean, default=True)
+
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_by = Column(String(255), nullable=True)

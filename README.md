@@ -352,8 +352,39 @@ Copy `.env.example` to `.env` in the `infrastructure/` directory and fill in the
 | `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret (`whsec_…`)                 |
 | `STRIPE_PRICE_BASIC`    | Stripe Price ID for the Basic plan                        |
 | `STRIPE_PRICE_PRO`      | Stripe Price ID for the Pro plan                          |
+| `SUPER_ADMIN_EMAIL`     | Email to auto-promote to `super_admin` — see [Roles & Admin Access](#roles--admin-access) below |
+
+---
+
+## Roles & Admin Access
+
+Beyond the default authenticated user, three elevated roles live in the `user_roles` table and are encoded in the JWT's `roles` claim (a user can hold more than one at once):
 
 
+| Role          | Grants                                                                                                                                                        |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `reviewer`    | Access to the HITL review queue (`/hitl/*`) — claim, approve, or override AI-graded essays                                                                    |
+| `admin`       | User visibility/deactivation, subscription visibility, knowledge base content management (`/retrieval/index`), batch job visibility, rubric weight management |
+| `super_admin` | Everything `admin` can do, plus granting/revoking roles and manually granting subscriptions                                                                   |
+
+
+### Bootstrapping the First Super Admin
+
+There is no UI or API path to self-assign a role — a fresh deployment has zero admins by design. Set `SUPER_ADMIN_EMAIL` in `infrastructure/.env` to the email that should become the first `super_admin`:
+
+```env
+SUPER_ADMIN_EMAIL=you@example.com
+```
+
+This is checked idempotently (safe to leave set permanently) in two places, so either ordering works without a manual SQL step:
+
+- On every `/auth/register` and `/auth/login` call for that email.
+- Once at `api_gateway` startup — covers the case where the account already existed before `SUPER_ADMIN_EMAIL` was set.
+
+From there, the super_admin can grant `admin` / `reviewer` / `super_admin` to other accounts via `POST /api/v1/admin/users/{user_id}/roles`.
+
+> **Note**: roles are baked into the JWT at issuance — a role change takes effect on that user's *next* login, not immediately (tokens live up to 24h).
+>
 ---
 
 ## Running Tests
@@ -408,4 +439,3 @@ Each service follows the same layout:
 └── scripts/           # One-off admin scripts (knowledge_retrieval only)
 ```
 
-2026

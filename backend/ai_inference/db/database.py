@@ -37,6 +37,38 @@ def get_db():
         db.close()
 
 
+_DEFAULT_RUBRIC_DIMENSIONS = [
+    # (dimension, max_score, description, display_order) — mirrors the 4-dimension,
+    # 25-points-each rubric that used to be hardcoded in core/grader.py's system prompt.
+    ("content",      25.0, "Argument clarity, analytical depth, evidence relevance.", 0),
+    ("organization", 25.0, "Logical flow, paragraph cohesion, intro/conclusion.", 1),
+    ("language",     25.0, "Vocabulary richness, sentence variety, academic register.", 2),
+    ("conventions",  25.0, "Spelling, punctuation, syntax accuracy.", 3),
+]
+
+
 def init_db() -> None:
-    from db.models import ReviewQueueORM  # noqa: F401 — registers table with Base
+    from db.models import ReviewQueueORM, RubricDimensionORM  # noqa: F401 — registers tables with Base
     Base.metadata.create_all(bind=engine)
+    _seed_default_rubric()
+
+
+def _seed_default_rubric() -> None:
+    from db.models import RubricDimensionORM  # noqa: PLC0415
+
+    db = SessionLocal()
+    try:
+        exists = db.query(RubricDimensionORM).filter(RubricDimensionORM.language == "en").first()
+        if exists:
+            return
+        for dimension, max_score, description, order in _DEFAULT_RUBRIC_DIMENSIONS:
+            db.add(RubricDimensionORM(
+                dimension=dimension,
+                language="en",
+                max_score=max_score,
+                description=description,
+                display_order=order,
+            ))
+        db.commit()
+    finally:
+        db.close()

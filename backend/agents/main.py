@@ -9,6 +9,7 @@ Exposes the 5 core AI agent endpoints:
   POST /agent/recommend   → Knowledge Retrieval RAG Agent
 """
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
@@ -31,9 +32,42 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s — %(message)s",
 )
 
+logger = logging.getLogger(__name__)
+
+
+def _init_llm_cache() -> None:
+    """
+    Process-wide LangChain LLM cache (prompt+params -> response), separate from
+    and layered underneath EvalCacheService's whole-essay result cache (US-17).
+    Prefers Redis (shared across replicas); falls back to an in-memory cache
+    when REDIS_URL is unset or langchain-community isn't installed.
+    """
+    from langchain_core.globals import set_llm_cache  # noqa: PLC0415
+
+    redis_url = os.getenv("REDIS_URL", "")
+    if redis_url:
+        try:
+            import redis  # noqa: PLC0415
+            from langchain_community.cache import RedisCache  # noqa: PLC0415
+
+            set_llm_cache(RedisCache(redis.from_url(redis_url)))
+            logger.info("LangChain LLM cache: Redis backend (%s)", redis_url)
+            return
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("LangChain Redis cache unavailable (%s) — using in-memory cache", exc)
+
+    try:
+        from langchain_core.caches import InMemoryCache as LCInMemoryCache  # noqa: PLC0415
+
+        set_llm_cache(LCInMemoryCache())
+        logger.info("LangChain LLM cache: in-memory backend")
+    except ImportError:
+        logger.warning("LangChain not installed — LLM cache disabled")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _init_llm_cache()
     # Eagerly initialise all agent singletons at startup so the first
     # real request is not slowed down by lazy initialisation.
     get_guardrail()

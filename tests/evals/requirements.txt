@@ -1,0 +1,17 @@
+# Test-only dependencies for the deepeval suite (tests/evals/). Not part of
+# any service's runtime image — installed separately by the eval CI job and
+# for local `pytest tests/evals -v -m eval` runs.
+pytest>=8.0.0
+httpx==0.27.0
+pydantic==2.7.1
+
+deepeval>=1.0.0
+
+# Judge model — Claude via LangChain, reusing the same provider the agents
+# service already depends on (backend/agents/requirements.txt) for its
+# cross-provider fallback chain.
+langchain-anthropic>=0.2.0
+
+# Chinese word segmentation — doc_processor.py imports this at module level,
+# needed even though these tests don't exercise the chunker directly.
+jieba==0.42.1

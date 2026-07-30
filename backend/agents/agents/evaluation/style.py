@@ -13,11 +13,7 @@ import logging
 import os
 
 from core.models import Language, StyleAnalysis
-from agents.evaluation._base import (
-    DEFAULT_EVAL_MODEL,
-    build_async_client,
-    parse_json_response,
-)
+from agents.evaluation._base import DEFAULT_EVAL_MODEL, build_structured_chain
 
 logger = logging.getLogger(__name__)
 
@@ -136,45 +132,30 @@ raw_score 评分标准（满分25）：
 
 class StyleAgent:
     def __init__(self, api_key: str | None = None, model: str | None = None) -> None:
-        self._client = build_async_client(api_key)
         self._model = model or os.getenv("EVAL_MODEL", DEFAULT_EVAL_MODEL)
+        self._chain = build_structured_chain(
+            StyleAnalysis, model=self._model, api_key=api_key, temperature=0.0,
+        )
 
     async def analyse(self, text: str, language: Language) -> StyleAnalysis:
-        if self._client is None:
+        if self._chain is None:
             return self._mock()
         return await self._llm_analyse(text, language)
 
     async def _llm_analyse(self, text: str, language: Language) -> StyleAnalysis:
+        from langchain_core.messages import HumanMessage, SystemMessage  # noqa: PLC0415
+
         system = _SYSTEM_PROMPT_ZH if language == Language.CHINESE else _SYSTEM_PROMPT_EN
         try:
-            resp = await self._client.chat.completions.create(
-                model=self._model,
-                max_tokens=1500,
-                temperature=0.0,
-                response_format={"type": "json_object"},
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": f"Essay to analyse:\n\n{text[:6000]}"},
-                ],
-            )
-            data = parse_json_response(resp.choices[0].message.content or "{}")
-
-            # Normalise tell_type_counts — fill missing keys with 0
-            raw_counts: dict = data.get("tell_type_counts", {})
-            tell_type_counts = {
-                "direct_emotion": int(raw_counts.get("direct_emotion", 0)),
-                "bare_adjective": int(raw_counts.get("bare_adjective", 0)),
-                "adverb_verb": int(raw_counts.get("adverb_verb", 0)),
-            }
-
-            return StyleAnalysis(
-                tell_count=int(data.get("tell_count", 0)),
-                tell_sentences=data.get("tell_sentences", []),
-                descriptive_quality=data.get("descriptive_quality", "adequate"),
-                raw_score=float(data.get("raw_score", 15.0)),
-                tell_type_counts=tell_type_counts,
-                emotion_patterns=data.get("emotion_patterns", []),
-            )
+            result = await self._chain.ainvoke([
+                SystemMessage(content=system),
+                HumanMessage(content=f"Essay to analyse:\n\n{text[:6000]}"),
+            ])
+            # Normalise tell_type_counts — fill missing keys with 0 (the LLM
+            # sometimes omits a key that had zero occurrences).
+            for key in ("direct_emotion", "bare_adjective", "adverb_verb"):
+                result.tell_type_counts.setdefault(key, 0)
+            return result
         except Exception as exc:  # noqa: BLE001
             logger.error("StyleAgent LLM call failed: %s", exc)
             return self._mock()
