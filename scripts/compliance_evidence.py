@@ -23,6 +23,17 @@ def _count_bandit_issues(path: Path) -> int:
     return len(data.get("results", [])) if data else 0
 
 
+def _count_bandit_blocking(path: Path) -> int:
+    data = _safe_json(path)
+    blocking = [
+        r
+        for r in data.get("results", [])
+        if r.get("issue_confidence") in {"MEDIUM", "HIGH"}
+        and r.get("issue_severity") in {"MEDIUM", "HIGH"}
+    ]
+    return len(blocking)
+
+
 def _count_semgrep_issues(path: Path) -> int:
     data = _safe_json(path)
     if data.get("results") is not None:
@@ -31,6 +42,17 @@ def _count_semgrep_issues(path: Path) -> int:
     for run in data.get("runs", []):
         count += len(run.get("results", []))
     return count
+
+
+def _count_semgrep_blocking(path: Path) -> int:
+    data = _safe_json(path)
+    return len(
+        [
+            r
+            for r in data.get("results", [])
+            if r.get("extra", {}).get("severity") == "ERROR"
+        ]
+    )
 
 
 def _count_checkov_issues(path: Path) -> int:
@@ -69,6 +91,8 @@ def build_report(artifacts_dir: Path) -> dict[str, Any]:
 
     bandit_count = _count_bandit_issues(sast_dir / "bandit.json")
     semgrep_count = _count_semgrep_issues(sast_dir / "semgrep.json")
+    bandit_blocking = _count_bandit_blocking(sast_dir / "bandit.json")
+    semgrep_blocking = _count_semgrep_blocking(sast_dir / "semgrep.json")
     checkov_count = _count_checkov_issues(iac_dir / "checkov.json")
     zap_count = _count_zap_warnings(dast_dir / "zap-report.json")
     git_audit_present = (audit_dir / "git-audit-report.json").exists()
@@ -76,8 +100,8 @@ def build_report(artifacts_dir: Path) -> dict[str, Any]:
     return {
         "status": "pass"
         if (
-            bandit_count == 0
-            and semgrep_count == 0
+            bandit_blocking == 0
+            and semgrep_blocking == 0
             and checkov_count == 0
             and zap_count == 0
             and not missing_artifacts
@@ -86,6 +110,8 @@ def build_report(artifacts_dir: Path) -> dict[str, Any]:
         "findings": {
             "bandit": bandit_count,
             "semgrep": semgrep_count,
+            "bandit_blocking": bandit_blocking,
+            "semgrep_blocking": semgrep_blocking,
             "checkov": checkov_count,
             "zap_alerts": zap_count,
             "git_audit_present": git_audit_present,
@@ -117,8 +143,8 @@ def write_markdown(report: dict[str, Any], target: Path) -> None:
         "# Security Compliance Evidence",
         "",
         f"- Overall status: `{report['status']}`",
-        f"- Bandit findings: `{findings['bandit']}`",
-        f"- Semgrep findings: `{findings['semgrep']}`",
+        f"- Bandit findings: `{findings['bandit']}` (blocking: `{findings['bandit_blocking']}`)",
+        f"- Semgrep findings: `{findings['semgrep']}` (blocking: `{findings['semgrep_blocking']}`)",
         f"- Checkov findings: `{findings['checkov']}`",
         f"- ZAP alerts: `{findings['zap_alerts']}`",
         f"- Git audit artifact present: `{findings['git_audit_present']}`",

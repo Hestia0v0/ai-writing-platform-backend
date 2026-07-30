@@ -254,7 +254,7 @@ class GradingEngine:
         200 characters, giving a stable result for the same text across runs.
         Range is bounded to 55–94 to exercise a variety of grades in tests.
         """
-        seed = int(hashlib.md5(text[:200].encode()).hexdigest(), 16) % 100
+        seed = int(hashlib.sha256(text[:200].encode()).hexdigest(), 16) % 100
         score = round(55.0 + (seed % 40), 1)
         confidence = round(0.60 + (seed % 35) / 100, 3)
 

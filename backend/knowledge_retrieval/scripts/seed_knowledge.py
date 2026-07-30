@@ -6,6 +6,7 @@ import sys
 import argparse
 import urllib.request
 import json
+from urllib.parse import urlparse
 
 TECHNIQUES = [
     {
@@ -268,6 +269,9 @@ TECHNIQUES = [
 
 
 def index_technique(base_url: str, slug: str, title: str, content: str) -> None:
+    parsed = urlparse(base_url)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("base-url must use http or https.")
     payload = json.dumps({
         "document_id": f"technique-{slug}",
         "content": content,
@@ -279,7 +283,7 @@ def index_technique(base_url: str, slug: str, title: str, content: str) -> None:
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=30) as resp:
+    with urllib.request.urlopen(req, timeout=30) as resp:  # nosec B310
         result = json.loads(resp.read())
     print(f"  [{result.get('status', 'ok')}] technique-{slug}")
 

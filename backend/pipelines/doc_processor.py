@@ -603,7 +603,7 @@ class GradingClient:
         )
 
     def _build_mock_result(self, document_id: str, word_count: int) -> ScoringResult:
-        seed = int(hashlib.md5(document_id.encode()).hexdigest(), 16) % 100
+        seed = int(hashlib.sha256(document_id.encode()).hexdigest(), 16) % 100
         score = round(55.0 + (seed % 40), 1)   # deterministic range 55–94
         return ScoringResult(
             document_id=document_id,

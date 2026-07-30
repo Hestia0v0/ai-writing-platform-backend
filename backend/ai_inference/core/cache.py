@@ -235,8 +235,8 @@ class RedisCache:
                 grade_keys = self._redis.keys("grade:*")
                 base["redis_used_memory"] = info.get("used_memory_human")
                 base["entries"] = len(grade_keys) // 2  # each entry = 2 keys
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Redis stats unavailable: %s", exc)
         else:
             base.update(self._fallback.stats())
         return base

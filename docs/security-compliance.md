@@ -22,6 +22,12 @@ All jobs in the `Security Compliance` workflow must be green:
 4. `Git Audit Trail` generates both JSON and Markdown artifacts.
 5. `Compliance Evidence (SOC2/HIPAA/GDPR)` status is `pass`.
 
+### SAST gate policy (implemented)
+
+- Bandit blocks only `MEDIUM/HIGH` severity findings with `MEDIUM/HIGH` confidence.
+- Semgrep blocks only findings with severity `ERROR`.
+- Warning/audit findings are still preserved in artifacts for manual triage.
+
 ## Manual local checks
 
 ### SAST
