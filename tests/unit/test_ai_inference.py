@@ -1,13 +1,27 @@
 """Unit tests — AI Inference Service"""
+import importlib.util
 import os
+from pathlib import Path
 import sys
 
 import pytest
 from fastapi.testclient import TestClient
 
-# 将 ai_inference 包加入 sys.path，供 fixture 内延迟 import main 使用。
-# （仅改路径，不加载 FastAPI 应用，故不会触发 lifespan / init_db。）
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../backend/ai_inference"))
+AI_INFERENCE_DIR = Path(__file__).resolve().parents[2] / "backend" / "ai_inference"
+AI_INFERENCE_MAIN = AI_INFERENCE_DIR / "main.py"
+
+
+def _purge_conflicting_modules() -> None:
+    """
+    Keep tests deterministic when another service test has already imported
+    top-level modules with the same names (main/auth/db/routers/dependencies).
+    """
+    prefixes = ("main", "auth", "db", "routers", "dependencies")
+    for module_name in list(sys.modules):
+        if module_name in prefixes or module_name.startswith(
+            tuple(f"{prefix}." for prefix in prefixes)
+        ):
+            sys.modules.pop(module_name, None)
 
 
 @pytest.fixture
@@ -19,10 +33,24 @@ def client():
     - `from main import app` 放在此处，避免在 pytest 收集本模块时加载整个应用栈。
     - `TestClient(app)` 会触发 ASGI lifespan startup（含 init_db），故必须与收集阶段解耦。
     """
-    from main import app  # noqa: PLC0415 — 故意延迟导入，见模块顶部中文说明
+    _purge_conflicting_modules()
+    ai_inference_path = str(AI_INFERENCE_DIR)
+    path_inserted = False
+    if ai_inference_path not in sys.path:
+        sys.path.insert(0, ai_inference_path)
+        path_inserted = True
 
-    with TestClient(app) as test_client:
-        yield test_client
+    spec = importlib.util.spec_from_file_location("ai_inference_test_main", AI_INFERENCE_MAIN)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    try:
+        with TestClient(module.app) as test_client:
+            yield test_client
+    finally:
+        if path_inserted:
+            sys.path.remove(ai_inference_path)
 
 
 def test_root(client):
