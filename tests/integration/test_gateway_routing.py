@@ -14,6 +14,7 @@ def test_gateway_health(http_client):
     assert response.status_code == 200
 
 
+
 @pytest.mark.integration
 def test_gateway_proxy_inference(http_client):
     response = http_client.get(f"{GATEWAY_URL}/api/v1/inference/stub")
