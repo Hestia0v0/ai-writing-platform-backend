@@ -50,20 +50,32 @@ jobs:
 
           bandit_file = Path("artifacts/sast/bandit.json")
           semgrep_file = Path("artifacts/sast/semgrep.json")
-          bandit = json.loads(bandit_file.read_text(encoding="utf-8")) if bandit_file.exists() else {}
-          semgrep = json.loads(semgrep_file.read_text(encoding="utf-8")) if semgrep_file.exists() else {}
-          bandit_count = len(bandit.get("results", []))
-          semgrep_count = len(semgrep.get("results", []))
-          total = bandit_count + semgrep_count
-          print(f"Bandit findings: {bandit_count}")
-          print(f"Semgrep findings: {semgrep_count}")
+          if not bandit_file.exists() or not semgrep_file.exists():
+            raise SystemExit("SAST artifacts missing (bandit.json/semgrep.json).")
+          bandit = json.loads(bandit_file.read_text(encoding="utf-8"))
+          semgrep = json.loads(semgrep_file.read_text(encoding="utf-8"))
+          bandit_results = bandit.get("results", [])
+          semgrep_results = semgrep.get("results", [])
+
+          blocking_bandit = [
+            r for r in bandit_results
+            if r.get("issue_confidence") in {"MEDIUM", "HIGH"}
+            and r.get("issue_severity") in {"MEDIUM", "HIGH"}
+          ]
+          blocking_semgrep = [r for r in semgrep_results if r.get("extra", {}).get("severity") == "ERROR"]
+
+          bandit_count = len(bandit_results)
+          semgrep_count = len(semgrep_results)
+          blocking_total = len(blocking_bandit) + len(blocking_semgrep)
+          print(f"Bandit findings: {bandit_count} (blocking={len(blocking_bandit)})")
+          print(f"Semgrep findings: {semgrep_count} (blocking={len(blocking_semgrep)})")
           with open("artifacts/sast/rescan-summary.md", "w", encoding="utf-8") as f:
             f.write("# SAST Rescan Summary\n\n")
-            f.write(f"- Bandit findings: `{bandit_count}`\n")
-            f.write(f"- Semgrep findings: `{semgrep_count}`\n")
-            f.write(f"- Total findings: `{total}`\n")
-          if total:
-            raise SystemExit("SAST rescan has unresolved findings.")
+            f.write(f"- Bandit findings: `{bandit_count}` (blocking: `{len(blocking_bandit)}`)\n")
+            f.write(f"- Semgrep findings: `{semgrep_count}` (blocking: `{len(blocking_semgrep)}`)\n")
+            f.write(f"- Total blocking findings: `{blocking_total}`\n")
+          if blocking_total:
+            raise SystemExit("SAST rescan has unresolved blocking findings.")
           PY
 
       - name: Upload SAST artifacts

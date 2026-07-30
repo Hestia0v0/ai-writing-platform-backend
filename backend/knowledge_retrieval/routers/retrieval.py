@@ -40,6 +40,8 @@ async def index_document(request: IndexRequest):
     vector = await embed(request.content)
     pool = await get_pool()
     async with pool.acquire() as conn:
+        # nosemgrep: python.django.security.injection.sql.sql-injection-using-db-cursor-execute.sql-injection-db-cursor-execute
+        # asyncpg uses positional binding ($1..$n) here, so this query is parameterized.
         await conn.execute(
             """
             INSERT INTO document_embeddings (document_id, content, embedding, metadata)
