@@ -354,18 +354,19 @@ Copy `.env.example` to `.env` in the `infrastructure/` directory and fill in the
 | `STRIPE_PRICE_PRO`      | Stripe Price ID for the Pro plan                          |
 | `SUPER_ADMIN_EMAIL`     | Email to auto-promote to `super_admin` — see [Roles & Admin Access](#roles--admin-access) below |
 
-
 ---
 
 ## Roles & Admin Access
 
 Beyond the default authenticated user, three elevated roles live in the `user_roles` table and are encoded in the JWT's `roles` claim (a user can hold more than one at once):
 
-| Role          | Grants                                                                                                                    |
-| ------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `reviewer`    | Access to the HITL review queue (`/hitl/*`) — claim, approve, or override AI-graded essays                                  |
+
+| Role          | Grants                                                                                                                                                        |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `reviewer`    | Access to the HITL review queue (`/hitl/*`) — claim, approve, or override AI-graded essays                                                                    |
 | `admin`       | User visibility/deactivation, subscription visibility, knowledge base content management (`/retrieval/index`), batch job visibility, rubric weight management |
-| `super_admin` | Everything `admin` can do, plus granting/revoking roles and manually granting subscriptions                                 |
+| `super_admin` | Everything `admin` can do, plus granting/revoking roles and manually granting subscriptions                                                                   |
+
 
 ### Bootstrapping the First Super Admin
 
@@ -376,13 +377,14 @@ SUPER_ADMIN_EMAIL=you@example.com
 ```
 
 This is checked idempotently (safe to leave set permanently) in two places, so either ordering works without a manual SQL step:
+
 - On every `/auth/register` and `/auth/login` call for that email.
 - Once at `api_gateway` startup — covers the case where the account already existed before `SUPER_ADMIN_EMAIL` was set.
 
 From there, the super_admin can grant `admin` / `reviewer` / `super_admin` to other accounts via `POST /api/v1/admin/users/{user_id}/roles`.
 
 > **Note**: roles are baked into the JWT at issuance — a role change takes effect on that user's *next* login, not immediately (tokens live up to 24h).
-
+>
 ---
 
 ## Running Tests
@@ -422,6 +424,42 @@ The `.github/workflows/ci.yml` workflow contains four jobs:
 
 ---
 
+## Container Management
+
+The project now includes end-to-end container management coverage for:
+
+- **Image build and storage**: `.github/workflows/container-management.yml` builds service images and pushes them to `ghcr.io` for non-PR events.
+- **Image security scanning**: the same workflow runs Trivy against each image and uploads SARIF reports.
+- **Container interaction and log analysis**: `scripts/container_tools.py` provides `ps`, `exec`, `logs`, and `analyze-logs` commands.
+
+### Local Usage
+
+```bash
+# 1) Show compose container status
+python scripts/container_tools.py ps
+
+# 2) Execute a command inside one container
+python scripts/container_tools.py exec api_gateway python -V
+
+# 3) Export logs from the last 15 minutes
+python scripts/container_tools.py logs --since 15m --output container.log
+
+# 4) Analyze logs and fail when errors/criticals are present
+python scripts/container_tools.py analyze-logs --log-file container.log --fail-on-error
+```
+
+### CI Workflow Behavior
+
+- Trigger: `push` / `pull_request` on `main` and `develop`, plus `workflow_dispatch`.
+- For each service (`api_gateway`, `ai_inference`, `knowledge_retrieval`, `pipelines`, `agents`):
+  - build image via `docker/build-push-action`;
+  - push to GHCR on non-PR events;
+  - run Trivy with `HIGH,CRITICAL` and always upload SARIF;
+  - enforce fail gate only on `main` push, or when manual dispatch sets `enforce_trivy_gate=true`;
+  - upload SARIF to both Security tab and workflow artifacts.
+
+---
+
 ## Project Structure per Service
 
 Each service follows the same layout:
@@ -437,4 +475,3 @@ Each service follows the same layout:
 └── scripts/           # One-off admin scripts (knowledge_retrieval only)
 ```
 
-2026.5.212026.5.1

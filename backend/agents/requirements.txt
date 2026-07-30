@@ -1,25 +1,26 @@
 fastapi==0.111.0
 uvicorn[standard]==0.29.0
 python-dotenv==1.0.1
-pydantic==2.7.1
+# Keep pydantic compatible with recent langchain-core releases.
+pydantic>=2.7.4,<3.0.0
 httpx==0.27.0
 
 # OpenAI-compatible SDK — still used directly by agents/refinement.py
-openai>=1.30.0
+openai>=1.40.0,<2.0.0
 
 # US-17 caching — Redis async client (optional; falls back to in-memory LRU when not installed)
 redis>=5.0.0
 
 # LangChain — structured output + retry/fallback chain + LLM cache for the
 # evaluation panel (agents/evaluation/*). See _base.py build_structured_chain().
-langchain-core>=0.3.0
-langchain-openai>=0.2.0
-langgraph>=0.2.0
+langchain-core==1.5.2
+langchain-openai==1.1.9
+langgraph==1.2.10
 
 # Optional cross-provider fallback for the evaluation panel — only exercised
 # when ANTHROPIC_API_KEY is set; import is guarded, safe to omit otherwise.
-langchain-anthropic>=0.2.0
+langchain-anthropic==1.5.3
 
 # Optional Redis-backed LangChain LLM cache; falls back to in-memory when
 # absent or when REDIS_URL is unset.
-langchain-community>=0.3.0
+langchain-community==0.4.2
