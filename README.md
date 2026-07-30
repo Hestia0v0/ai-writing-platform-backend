@@ -424,6 +424,41 @@ The `.github/workflows/ci.yml` workflow contains four jobs:
 
 ---
 
+## Container Management
+
+The project now includes end-to-end container management coverage for:
+
+- **Image build and storage**: `.github/workflows/container-management.yml` builds service images and pushes them to `ghcr.io` for non-PR events.
+- **Image security scanning**: the same workflow runs Trivy against each image and uploads SARIF reports.
+- **Container interaction and log analysis**: `scripts/container_tools.py` provides `ps`, `exec`, `logs`, and `analyze-logs` commands.
+
+### Local Usage
+
+```bash
+# 1) Show compose container status
+python scripts/container_tools.py ps
+
+# 2) Execute a command inside one container
+python scripts/container_tools.py exec api_gateway python -V
+
+# 3) Export logs from the last 15 minutes
+python scripts/container_tools.py logs --since 15m --output container.log
+
+# 4) Analyze logs and fail when errors/criticals are present
+python scripts/container_tools.py analyze-logs --log-file container.log --fail-on-error
+```
+
+### CI Workflow Behavior
+
+- Trigger: `push` / `pull_request` on `main` and `develop`, plus `workflow_dispatch`.
+- For each service (`api_gateway`, `ai_inference`, `knowledge_retrieval`, `pipelines`, `agents`):
+  - build image via `docker/build-push-action`;
+  - push to GHCR on non-PR events;
+  - run Trivy with `HIGH,CRITICAL` severity gate (`exit-code: 1`);
+  - upload SARIF to both Security tab and workflow artifacts.
+
+---
+
 ## Project Structure per Service
 
 Each service follows the same layout:
