@@ -31,12 +31,12 @@ _PUBLIC_PREFIXES = ("/health", "/auth")
 
 _DAILY_LIMITS = {"free": 10, "basic": 100}
 
+# lifespan is a context manager that is used to manage the lifespan of the application
 _redis_client = redis_lib.from_url(
     os.getenv("REDIS_URL", "redis://redis:6379/0"),
     decode_responses=True,
 )
 
-# lifespan is a context manager that is used to manage the lifespan of the application
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Covers the "SUPER_ADMIN_EMAIL set AFTER that email already registered"
