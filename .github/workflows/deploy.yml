@@ -4,6 +4,13 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      run_deploy:
+        description: "Run production deploy over SSH"
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: production-deploy
@@ -17,6 +24,7 @@ jobs:
     name: Deploy to Linux server
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_deploy }}
 
     # Configure these GitHub repository secrets before enabling production deploys:
     # - SERVER_HOST: public IP address or domain name of the Linux server
