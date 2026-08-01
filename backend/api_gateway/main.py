@@ -35,6 +35,7 @@ _redis_client = redis_lib.from_url(
     os.getenv("REDIS_URL", "redis://redis:6379/0"),
     decode_responses=True,
 )
+
 # lifespan is a context manager that is used to manage the lifespan of the application
 @asynccontextmanager
 async def lifespan(app: FastAPI):

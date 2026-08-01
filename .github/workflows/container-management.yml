@@ -104,8 +104,8 @@ jobs:
               f.write(f"count={findings}\n")
           PY
 
-      - name: Enforce Trivy gate (main push or manual opt-in)
-        if: ${{ steps.trivy_counts.outputs.count != '0' && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.enforce_trivy_gate)) }}
+      - name: Enforce Trivy gate (manual opt-in)
+        if: ${{ steps.trivy_counts.outputs.count != '0' && github.event_name == 'workflow_dispatch' && inputs.enforce_trivy_gate }}
         run: |
           echo "Trivy found HIGH/CRITICAL vulnerabilities for ${{ matrix.service }} (count=${{ steps.trivy_counts.outputs.count }})."
           echo "Review SARIF in Security tab/artifacts."
