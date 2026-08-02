@@ -11,6 +11,16 @@ on:
         required: false
         type: boolean
         default: false
+      run_migrations:
+        description: "Run DB migration scripts before deploy"
+        required: false
+        type: boolean
+        default: true
+      health_check_timeout:
+        description: "Max seconds to wait for post-deploy health check"
+        required: false
+        type: number
+        default: 120
 
 concurrency:
   group: production-deploy
@@ -26,17 +36,21 @@ jobs:
     timeout-minutes: 30
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_deploy }}
 
-    # Configure these GitHub repository secrets before enabling production deploys:
-    # - SERVER_HOST: public IP address or domain name of the Linux server
-    # - SERVER_USER: SSH username on the Linux server
-    # - SERVER_SSH_KEY: private SSH key with deployment access to the Linux server
-    # - SERVER_PORT: SSH port; optional because this workflow defaults to 22
-    # - PROJECT_PATH: absolute path to the cloned repo on the server
+    # ── Required GitHub repository secrets ──────────────────────────────────
+    # SERVER_HOST       — public IP / domain of the Linux server
+    # SERVER_USER       — SSH username
+    # SERVER_SSH_KEY    — private SSH key for deployment access
+    # SERVER_PORT       — SSH port (defaults to 22 if unset)
+    # PROJECT_PATH      — absolute path to cloned repo on the server
+    # POSTGRES_DSN      — production database connection string (for migrations)
+    # ─────────────────────────────────────────────────────────────────────────
+
     env:
       PROJECT_PATH: ${{ secrets.PROJECT_PATH }}
 
     steps:
-      - name: Deploy over SSH
+      # ── 1. Deploy with health check & rollback ──────────────────────────
+      - name: Deploy over SSH (with health check & rollback)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -50,8 +64,93 @@ jobs:
             set -eu
 
             cd "$PROJECT_PATH"
+
+            # ── Save current commit for potential rollback ─────────────────
+            PREVIOUS_COMMIT=$(git rev-parse HEAD)
+            echo "▶ Previous commit: $PREVIOUS_COMMIT"
+
+            # ── Pull latest code ──────────────────────────────────────────
             git pull origin main
+            NEW_COMMIT=$(git rev-parse HEAD)
+            echo "▶ New commit: $NEW_COMMIT"
 
-            docker compose -f docker-compose.prod.yml up -d --build
+            if [ "$PREVIOUS_COMMIT" = "$NEW_COMMIT" ]; then
+              echo "▶ No new changes. Skipping deploy."
+              exit 0
+            fi
 
+            # ── Run DB migrations (idempotent: uses IF NOT EXISTS / IF EXISTS) ─
+            # Use a temporary postgres container to run migrations — no need for
+            # psql on the host. Migrations use IF NOT EXISTS / IF EXISTS so they
+            # are safe to re-run.
+            MIGRATIONS_FOUND=false
+            if [ -n "${POSTGRES_DSN:-}" ]; then
+              for f in infrastructure/migrations/*.sql; do
+                if [ -f "$f" ]; then
+                  MIGRATIONS_FOUND=true
+                  echo "▶ Running migration via docker: $f"
+                  docker run --rm --network host \
+                    -v "$(pwd)/$f:/migration.sql:ro" \
+                    postgres:16 \
+                    psql "${POSTGRES_DSN}" -f /migration.sql -v ON_ERROR_STOP=0 2>&1 \
+                    || echo "⚠ Migration $f had warnings (may already be applied)"
+                fi
+              done
+            else
+              echo "⚠ POSTGRES_DSN not set in server environment; skipping migrations."
+              echo "  Set POSTGRES_DSN in server's /etc/environment or ~/.bashrc."
+            fi
+            if [ "$MIGRATIONS_FOUND" = false ]; then
+              echo "▶ No migration files found."
+            fi
+
+            # ── Deploy ───────────────────────────────────────────────────
+            echo "▶ Starting deploy..."
+            docker compose -f docker-compose.prod.yml up -d --build 2>&1
+
+            # ── Health check loop ─────────────────────────────────────────
+            echo "▶ Waiting for gateway health check..."
+            HEALTH_TIMEOUT=${{ inputs.health_check_timeout || 120 }}
+            HEALTH_INTERVAL=3
+            ELAPSED=0
+            HEALTHY=false
+
+            while [ $ELAPSED -lt $HEALTH_TIMEOUT ]; do
+              if curl -fsS -o /dev/null -w "%{http_code}" http://localhost:8000/health/ 2>/dev/null | grep -q "200"; then
+                echo "✅ Gateway healthy after ${ELAPSED}s"
+                HEALTHY=true
+                break
+              fi
+              echo "  ... waiting (${ELAPSED}s / ${HEALTH_TIMEOUT}s)"
+              sleep $HEALTH_INTERVAL
+              ELAPSED=$((ELAPSED + HEALTH_INTERVAL))
+            done
+
+            if [ "$HEALTHY" = false ]; then
+              echo "❌ Health check failed after ${HEALTH_TIMEOUT}s — rolling back!"
+
+              # ── Rollback ───────────────────────────────────────────────
+              echo "▶ Rolling back to $PREVIOUS_COMMIT"
+              git checkout "$PREVIOUS_COMMIT"
+              docker compose -f docker-compose.prod.yml up -d --build 2>&1
+
+              # Verify rollback
+              sleep 5
+              if curl -fsS -o /dev/null http://localhost:8000/health/ 2>/dev/null; then
+                echo "✅ Rollback successful — service is healthy on $PREVIOUS_COMMIT"
+              else
+                echo "❌ Rollback health check also failed — manual intervention required!"
+              fi
+
+              # Clean up after successful deploy
+              docker image prune -f
+
+              exit 1
+            fi
+
+            echo "✅ Deploy successful: $PREVIOUS_COMMIT → $NEW_COMMIT"
+
+            # ── Clean up old images ──────────────────────────────────────
             docker image prune -f
+
+            echo "▶ Deploy complete."

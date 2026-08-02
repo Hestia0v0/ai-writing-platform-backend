@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       enforce_trivy_gate:
-        description: "Fail workflow when Trivy finds HIGH/CRITICAL vulnerabilities"
+        description: "Fail workflow when Trivy finds HIGH/CRITICAL vulnerabilities (auto-enforced on push to main)"
         required: false
         type: boolean
         default: false
@@ -104,11 +104,17 @@ jobs:
               f.write(f"count={findings}\n")
           PY
 
-      - name: Enforce Trivy gate (manual opt-in)
-        if: ${{ steps.trivy_counts.outputs.count != '0' && github.event_name == 'workflow_dispatch' && inputs.enforce_trivy_gate }}
+      - name: Enforce Trivy gate
+        # Auto-enforce on push to main branch; manual opt-in otherwise via workflow_dispatch.
+        if: |
+          steps.trivy_counts.outputs.count != '0' && (
+            (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+            (github.event_name == 'workflow_dispatch' && inputs.enforce_trivy_gate)
+          )
         run: |
           echo "Trivy found HIGH/CRITICAL vulnerabilities for ${{ matrix.service }} (count=${{ steps.trivy_counts.outputs.count }})."
           echo "Review SARIF in Security tab/artifacts."
+          echo "Trigger: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'auto-block (main push)' || 'manual opt-in' }}"
           exit 1
 
       - name: Upload Trivy SARIF
