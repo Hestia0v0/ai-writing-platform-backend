@@ -5,6 +5,7 @@ from datetime import date
 from typing import Optional
 
 import jwt
+import psycopg2
 import redis as redis_lib
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -52,14 +53,6 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="API Gateway", version="0.1.0", lifespan=lifespan)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_CORS_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 
 def _get_user_plan(user_id: str) -> str:
@@ -134,6 +127,79 @@ async def jwt_middleware(request: Request, call_next):
             return quota_response
 
     return await call_next(request)
+
+
+# Registered LAST on purpose. add_middleware() inserts at position 0, so the
+# most recently added middleware is the OUTERMOST one. Registering CORS after
+# jwt_middleware puts it outside, which is what makes the 401s that
+# jwt_middleware returns directly (missing header / expired / invalid token)
+# carry CORS headers — otherwise the browser reports them as CORS failures and
+# the frontend never sees the real 401.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+def _cors_headers(request: Request) -> dict[str, str]:
+    """
+    Mirror CORSMiddleware's response headers by hand.
+
+    Needed because Starlette's ServerErrorMiddleware sits OUTSIDE every user
+    middleware, including CORS. An unhandled exception therefore produces a 500
+    that never passes through CORSMiddleware, and the browser masks the real
+    error as a CORS failure. No reordering fixes that, so the 500 handler below
+    sets the headers itself.
+    """
+    origin = request.headers.get("origin")
+    if not origin:
+        return {}
+    if "*" not in _CORS_ORIGINS and origin not in _CORS_ORIGINS:
+        return {}
+    return {
+        "Access-Control-Allow-Origin": origin,
+        "Access-Control-Allow-Credentials": "true",
+        "Vary": "Origin",
+    }
+
+
+@app.exception_handler(psycopg2.OperationalError)
+async def postgres_unavailable_handler(request: Request, exc: psycopg2.OperationalError):
+    """DB unreachable / connection pool exhausted — the client can retry."""
+    logger.exception("PostgreSQL unavailable on %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "Database temporarily unavailable. Please try again."},
+        headers=_cors_headers(request),
+    )
+
+
+@app.exception_handler(redis_lib.RedisError)
+async def redis_unavailable_handler(request: Request, exc: redis_lib.RedisError):
+    """Redis unreachable — verification codes and quota counters both live here."""
+    logger.exception("Redis unavailable on %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "Cache temporarily unavailable. Please try again."},
+        headers=_cors_headers(request),
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_error_handler(request: Request, exc: Exception):
+    """
+    Catch-all so a 500 still carries CORS headers. ServerErrorMiddleware
+    re-raises after this returns, so uvicorn still logs the full traceback.
+    """
+    logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error."},
+        headers=_cors_headers(request),
+    )
 
 
 app.include_router(health.router, prefix="/health", tags=["health"])

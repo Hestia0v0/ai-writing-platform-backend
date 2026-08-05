@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 
 from auth import require_role
-from db import get_conn
+from db import db_conn
 
 router = APIRouter()
 
@@ -59,7 +59,7 @@ class SubscriptionGrant(BaseModel):
 # ── Internal helpers (plain functions, not route handlers — safe to call directly) ──
 
 def _fetch_user_summary(user_id: str) -> UserSummary:
-    with get_conn() as conn:
+    with db_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -90,7 +90,7 @@ def list_users(
     offset: int = Query(default=0, ge=0),
     _roles=Depends(require_role("admin", "super_admin")),
 ) -> list[UserSummary]:
-    with get_conn() as conn:
+    with db_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -126,7 +126,7 @@ def patch_user(
     patch: UserPatch,
     _roles=Depends(require_role("admin", "super_admin")),
 ) -> UserSummary:
-    with get_conn() as conn:
+    with db_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "UPDATE users SET is_active = %s WHERE user_id = %s RETURNING user_id",
@@ -154,7 +154,7 @@ def grant_user_role(
             detail=f"role must be one of {sorted(_VALID_ROLES)}.",
         )
     granted_by = request.state.user_id  # authenticated caller, never client-supplied
-    with get_conn() as conn:
+    with db_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT user_id FROM users WHERE user_id = %s", (user_id,))
             if cur.fetchone() is None:
@@ -177,7 +177,7 @@ def revoke_user_role(
     role: str,
     _roles=Depends(require_role("super_admin")),
 ) -> UserSummary:
-    with get_conn() as conn:
+    with db_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "DELETE FROM user_roles WHERE user_id = %s AND role = %s",
@@ -195,7 +195,7 @@ def list_subscriptions(
     offset: int = Query(default=0, ge=0),
     _roles=Depends(require_role("admin", "super_admin")),
 ) -> list[SubscriptionSummary]:
-    with get_conn() as conn:
+    with db_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -230,7 +230,7 @@ def grant_subscription(
             detail=f"plan must be one of {sorted(_VALID_PLANS)}.",
         )
     period_end = datetime.now(timezone.utc) + timedelta(days=body.days)
-    with get_conn() as conn:
+    with db_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT user_id, email FROM users WHERE user_id = %s", (user_id,))
             user_row = cur.fetchone()

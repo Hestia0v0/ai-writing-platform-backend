@@ -4,7 +4,7 @@ import uuid
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, EmailStr, Field
 
-from db import get_conn, get_user_roles, grant_role
+from db import db_conn, get_user_roles, grant_role
 from auth import hash_password, verify_password, create_token
 from email_verification import (
     EmailDeliveryError,
@@ -65,7 +65,7 @@ class SendEmailCodeResponse(BaseModel):
 )
 def send_email_code(req: SendEmailCodeRequest) -> SendEmailCodeResponse:
     email = EmailVerificationService.normalize_email(str(req.email))
-    with get_conn() as conn:
+    with db_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT 1 FROM users WHERE LOWER(email) = %s", (email,))
             if cur.fetchone():
@@ -95,7 +95,7 @@ def register(req: RegisterRequest) -> TokenResponse:
     except VerificationAttemptsExceeded as exc:
         raise HTTPException(status_code=429, detail=str(exc)) from exc
 
-    with get_conn() as conn:
+    with db_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT user_id FROM users WHERE LOWER(email) = %s", (email,))
             if cur.fetchone():
@@ -113,7 +113,7 @@ def register(req: RegisterRequest) -> TokenResponse:
 
 @router.post("/login", response_model=TokenResponse)
 def login(req: LoginRequest) -> TokenResponse:
-    with get_conn() as conn:
+    with db_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT user_id, hashed_password FROM users WHERE email = %s AND is_active = TRUE",
