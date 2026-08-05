@@ -53,16 +53,58 @@ CREATE TABLE IF NOT EXISTS user_roles (
 CREATE INDEX IF NOT EXISTS idx_user_roles_user_id ON user_roles (user_id);
 
 -- ── AI Inference: HITL review queue ─────────────────────────────────────────
--- SQLAlchemy creates this table via init_db(); defined here as reference only.
--- (Uncomment and remove the SQLAlchemy auto-create if you prefer pure SQL migrations.)
--- CREATE TABLE IF NOT EXISTS review_queue ( ... );
+-- Mirrors db/models.py ReviewQueueORM. SQLAlchemy would also create this via
+-- init_db() on first service startup; defined here so a manually-provisioned
+-- database (e.g. cloud RDS) doesn't need the service to run first.
+CREATE TABLE IF NOT EXISTS review_queue (
+    id              SERIAL      PRIMARY KEY,
+    review_id       VARCHAR(36)  UNIQUE NOT NULL,
+    inference_id    VARCHAR(36)  UNIQUE NOT NULL,
+    document_id     VARCHAR(255) NOT NULL,
+    text_hash       VARCHAR(64)  NOT NULL,
+    text_preview    TEXT,
+    ai_score        DOUBLE PRECISION NOT NULL,
+    ai_confidence   DOUBLE PRECISION NOT NULL,
+    ai_feedback     TEXT,
+    rubric_json     JSON,
+    flag_reason     VARCHAR(50) NOT NULL,
+    status          VARCHAR(20) NOT NULL DEFAULT 'pending',
+    reviewer_id     VARCHAR(255),
+    reviewer_score  DOUBLE PRECISION,
+    reviewer_notes  TEXT,
+    created_at      TIMESTAMP   NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc'),
+    assigned_at     TIMESTAMP,
+    resolved_at     TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_review_queue_review_id    ON review_queue (review_id);
+CREATE INDEX IF NOT EXISTS idx_review_queue_inference_id ON review_queue (inference_id);
+CREATE INDEX IF NOT EXISTS idx_review_queue_document_id  ON review_queue (document_id);
 
 -- ── AI Inference: Rubric configuration ───────────────────────────────────────
--- Also SQLAlchemy-managed (db/models.py RubricDimensionORM) — ai_inference's
--- init_db() creates this table AND seeds the default 4 dimensions/25 points
--- each on first startup against any fresh database, cloud or local. Listed
--- here as reference only, same as review_queue above.
--- CREATE TABLE IF NOT EXISTS rubric_dimensions ( ... );
+-- Mirrors db/models.py RubricDimensionORM. init_db() also seeds the default
+-- 4 dimensions/25 points each on first startup against any fresh database;
+-- the INSERT below reproduces that seed for manually-provisioned databases.
+CREATE TABLE IF NOT EXISTS rubric_dimensions (
+    id             SERIAL      PRIMARY KEY,
+    dimension      VARCHAR(50) NOT NULL,
+    language       VARCHAR(10) NOT NULL DEFAULT 'en',
+    max_score      DOUBLE PRECISION NOT NULL DEFAULT 25.0,
+    description    TEXT        DEFAULT '',
+    display_order  INTEGER     DEFAULT 0,
+    is_active      BOOLEAN     DEFAULT TRUE,
+    updated_at     TIMESTAMP   DEFAULT (NOW() AT TIME ZONE 'utc'),
+    updated_by     VARCHAR(255),
+    CONSTRAINT uq_rubric_dim_lang UNIQUE (dimension, language)
+);
+
+INSERT INTO rubric_dimensions (dimension, language, max_score, description, display_order)
+VALUES
+    ('content',      'en', 25.0, 'Argument clarity, analytical depth, evidence relevance.', 0),
+    ('organization', 'en', 25.0, 'Logical flow, paragraph cohesion, intro/conclusion.', 1),
+    ('language',     'en', 25.0, 'Vocabulary richness, sentence variety, academic register.', 2),
+    ('conventions',  'en', 25.0, 'Spelling, punctuation, syntax accuracy.', 3)
+ON CONFLICT ON CONSTRAINT uq_rubric_dim_lang DO NOTHING;
 
 -- ── Billing: Subscriptions ───────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS subscriptions (
