@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from auth import decode_token
-from db import get_conn, seed_super_admin_by_email
+from db import ensure_gateway_schema, get_conn, seed_super_admin_by_email
 from routers import admin, auth, billing, health, proxy
 
 logger = logging.getLogger(__name__)
@@ -40,6 +40,17 @@ _redis_client = redis_lib.from_url(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Bring this service's tables up to date before serving traffic. Databases
+    # provisioned before the Stripe and RBAC work — every pre-existing
+    # postgres_data volume, and every managed database, which never runs
+    # init.sql — still carry the old schema, so /api/v1/billing/status 500s on
+    # the missing `subscriptions` columns and login 500s on the absent
+    # `user_roles` table until this runs. See db.py for the full note.
+    try:
+        ensure_gateway_schema()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Gateway schema check failed at startup: %s", exc)
+
     # Covers the "SUPER_ADMIN_EMAIL set AFTER that email already registered"
     # ordering — the register/login-time check in routers/auth.py covers the
     # reverse ordering. No-op (and safe to retry) if the email hasn't
