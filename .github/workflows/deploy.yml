@@ -14,7 +14,13 @@ on:
 
 concurrency:
   group: production-deploy
-  cancel-in-progress: true
+  # Never cancel a deploy that is already running. Cancelling mid-`docker
+  # compose up --build` leaves the server with a half-built image set and some
+  # containers on the old release; queueing the next run instead costs a few
+  # minutes and always lands on a consistent state. This mattered little while
+  # deploys were manual and rare — with every merge deploying, back-to-back
+  # merges would otherwise interrupt each other.
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -24,7 +30,10 @@ jobs:
     name: Deploy to Linux server
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_deploy }}
+    # Push events are already filtered to main by the `on:` trigger above, so
+    # every merge into main deploys. Manual runs still have to tick run_deploy,
+    # which keeps a stray workflow_dispatch from redeploying by accident.
+    if: ${{ github.event_name == 'push' || inputs.run_deploy }}
 
     # Configure these GitHub repository secrets before enabling production deploys:
     # - SERVER_HOST: public IP address or domain name of the Linux server
