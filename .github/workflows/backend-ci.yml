@@ -96,6 +96,29 @@ jobs:
           • tests/unit/test_pipelines.py — HTTP/component：模块级 TestClient(app) + lifespan 内 asyncpg 连接 Postgres；
             未纳入 minimal CI；纯逻辑已拆至 test_pipelines_doc_processor.py。
           • tests/unit/test_security.py — 模块级 inference TestClient 等，未纳入 minimal CI。
+          • tests/unit/test_agents.py — 可通过 pytest 离线运行（mock mode），但 import main 链路过长，
+            暂不纳入 minimal CI；完整矩阵见 ci.yml。
           • e2e / performance（如 Locust）— 非本 job 范围。
           ============================================
           EOF
+
+  # ── Docker Compose 配置校验 ──────────────────────────────────────────────
+  # 在每次 PR 时校验 compose 文件语法，防止格式错误流入生产部署。
+  compose-validate:
+    name: Compose 文件校验
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 校验 docker-compose.prod.yml
+        run: |
+          echo "▶ Validating docker-compose.prod.yml..."
+          docker compose -f docker-compose.prod.yml config --quiet 2>&1
+          echo "✅ docker-compose.prod.yml is valid"
+
+      - name: 校验 infrastructure/docker-compose.yml
+        run: |
+          echo "▶ Validating infrastructure/docker-compose.yml..."
+          docker compose -f infrastructure/docker-compose.yml config --quiet 2>&1
+          echo "✅ infrastructure/docker-compose.yml is valid"
