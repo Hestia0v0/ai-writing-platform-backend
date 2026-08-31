@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   unit-tests:
-    name: Unit Tests (with JUnit artifact)
+    name: Unit Tests and Coverage (with JUnit/HTML artifacts)
     runs-on: ubuntu-latest
     env:
       DATABASE_URL: sqlite:////tmp/ai_inference_ci.sqlite
@@ -39,7 +39,7 @@ jobs:
           pip install -r backend/api_gateway/requirements.txt
           pip install -r backend/ai_inference/requirements.txt
           pip install -r backend/pipelines/requirements.txt
-          pip install pytest httpx pytest-asyncio pyjwt
+          pip install pytest pytest-cov httpx pytest-asyncio pyjwt
 
       - name: Run unit tests and generate JUnit XML
         id: unit_tests
@@ -51,12 +51,26 @@ jobs:
             tests/unit/test_pipelines_doc_processor.py \
             tests/unit/test_response_mapping.py \
             -v --tb=short \
-            --junitxml=artifacts/unit/pytest-unit.xml
+            --junitxml=artifacts/unit/pytest-unit.xml \
+            --cov=backend/api_gateway \
+            --cov=backend/ai_inference \
+            --cov=backend/pipelines \
+            --cov-report=term-missing \
+            --cov-report=html:artifacts/unit/coverage-html \
+            --cov-report=xml:artifacts/unit/coverage.xml
+
+          coverage html --directory=artifacts/unit/coverage-html/api_gateway \
+            --include='backend/api_gateway/*'
+          coverage html --directory=artifacts/unit/coverage-html/ai_inference \
+            --include='backend/ai_inference/*'
+          coverage html --directory=artifacts/unit/coverage-html/pipelines \
+            --include='backend/pipelines/*'
 
       - name: Ensure unit artifacts exist
         if: always()
         run: |
           touch artifacts/unit/.keep
+          mkdir -p artifacts/unit/coverage-html
           if [ ! -f artifacts/unit/pytest-unit.xml ]; then
             cat <<'EOF' > artifacts/unit/pytest-unit.xml
           <testsuite name="unit-tests" tests="0" failures="1">
