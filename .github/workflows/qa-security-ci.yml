@@ -57,7 +57,8 @@ jobs:
             --cov=backend/pipelines \
             --cov-report=term-missing \
             --cov-report=html:artifacts/unit/coverage-html \
-            --cov-report=xml:artifacts/unit/coverage.xml
+            --cov-report=xml:artifacts/unit/coverage.xml \
+            --cov-report=json:artifacts/unit/coverage.json
 
           coverage html --directory=artifacts/unit/coverage-html/api_gateway \
             --include='backend/api_gateway/*'
@@ -65,6 +66,93 @@ jobs:
             --include='backend/ai_inference/*'
           coverage html --directory=artifacts/unit/coverage-html/pipelines \
             --include='backend/pipelines/*'
+
+      - name: Publish coverage summary by microservice
+        if: steps.unit_tests.outcome == 'success'
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          junit = ET.parse("artifacts/unit/pytest-unit.xml").getroot()
+          coverage = json.loads(Path("artifacts/unit/coverage.json").read_text())
+          suites = list(junit.iter("testsuite"))
+          cases = list(junit.iter("testcase"))
+
+          def test_stats(prefixes):
+              selected = [
+                  case for case in cases
+                  if any(case.get("classname", "").startswith(prefix) for prefix in prefixes)
+              ]
+              failed = sum(case.find("failure") is not None or case.find("error") is not None for case in selected)
+              skipped = sum(case.find("skipped") is not None for case in selected)
+              return len(selected), len(selected) - failed - skipped
+
+          def coverage_stats(service):
+              prefix = f"backend/{service}/"
+              summaries = [
+                  details["summary"] for filename, details in coverage["files"].items()
+                  if filename.startswith(prefix)
+              ]
+              statements = sum(item["num_statements"] for item in summaries)
+              covered = sum(item["covered_lines"] for item in summaries)
+              percent = covered / statements * 100 if statements else 0
+              return statements, covered, round(percent)
+
+          services = [
+              ("API Gateway", "api_gateway", ("tests.unit.test_api_gateway",)),
+              ("AI Inference", "ai_inference", ("tests.unit.test_ai_inference",)),
+              (
+                  "Pipelines",
+                  "pipelines",
+                  (
+                      "tests.unit.test_pipelines_doc_processor",
+                      "tests.unit.test_response_mapping",
+                  ),
+              ),
+          ]
+
+          total_tests = sum(int(suite.get("tests", 0)) for suite in suites)
+          failures = sum(int(suite.get("failures", 0)) for suite in suites)
+          errors = sum(int(suite.get("errors", 0)) for suite in suites)
+          skipped = sum(int(suite.get("skipped", 0)) for suite in suites)
+          passed = total_tests - failures - errors - skipped
+          totals = coverage["totals"]
+
+          lines = [
+              "# Backend Unit Test and Coverage Report",
+              "",
+              f"**Commit:** `{os.environ['GITHUB_SHA'][:7]}`  ",
+              f"**Result:** {passed}/{total_tests} unit tests passed",
+              "",
+              "| Scope | Unit tests | Passed | Statements | Covered | Coverage |",
+              "|---|---:|---:|---:|---:|---:|",
+              (
+                  f"| **Overall** | **{total_tests}** | **{passed}** | "
+                  f"**{totals['num_statements']}** | **{totals['covered_lines']}** | "
+                  f"**{totals['percent_covered']:.0f}%** |"
+              ),
+          ]
+
+          for title, service, prefixes in services:
+              tests, service_passed = test_stats(prefixes)
+              statements, covered, percent = coverage_stats(service)
+              lines.append(
+                  f"| {title} | {tests} | {service_passed} | {statements} | {covered} | {percent}% |"
+              )
+
+          lines.extend([
+              "",
+              "> Generated during this GitHub Actions run from pytest JUnit XML and coverage.py JSON artifacts.",
+              "",
+          ])
+          report = "\n".join(lines)
+          Path("artifacts/unit/coverage-summary.md").write_text(report)
+          with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a") as summary:
+              summary.write(report)
+          PY
 
       - name: Ensure unit artifacts exist
         if: always()
