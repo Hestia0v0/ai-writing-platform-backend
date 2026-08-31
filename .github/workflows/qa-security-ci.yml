@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  checks: write
 
 jobs:
   unit-tests:
@@ -67,7 +68,7 @@ jobs:
           coverage html --directory=artifacts/unit/coverage-html/pipelines \
             --include='backend/pipelines/*'
 
-      - name: Publish coverage summary by microservice
+      - name: Generate coverage summary by microservice
         if: steps.unit_tests.outcome == 'success'
         run: |
           python - <<'PY'
@@ -150,9 +151,34 @@ jobs:
           ])
           report = "\n".join(lines)
           Path("artifacts/unit/coverage-summary.md").write_text(report)
-          with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a") as summary:
-              summary.write(report)
           PY
+
+      - name: Publish coverage report to GitHub
+        if: steps.unit_tests.outcome == 'success'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('artifacts/unit/coverage-summary.md', 'utf8');
+
+            await core.summary
+              .addRaw(report)
+              .write();
+
+            if (context.eventName === 'push') {
+              await github.rest.checks.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: 'Backend Unit Test and Coverage Report',
+                head_sha: context.sha,
+                status: 'completed',
+                conclusion: 'success',
+                output: {
+                  title: 'Backend unit tests and coverage by microservice',
+                  summary: report,
+                },
+              });
+            }
 
       - name: Ensure unit artifacts exist
         if: always()
